@@ -1,0 +1,928 @@
+/**
+ * Browser half: the ApophisCode settings page and the composer balance chip.
+ *
+ * Every number here comes from the host over the plugin's own loopback RPC
+ * channel; no key material crosses it, and each read is a bounded projection
+ * the host built.
+ *
+ * @module dsh-apophiscode-api/client
+ */
+
+import * as react from 'react'
+
+import { en, zh } from './client-copy.js'
+import { STYLE } from './client-style.js'
+import { installImagePresentation, ApophisCodeImagesCard, ApophisCodeImageShortcut } from './client-images.jsx'
+import { fill, KeyBalance, QuotaHover } from './client-balance.jsx'
+import { KeyRenameForm, useKeyRename } from './client-key-rename.jsx'
+import { DiagnosticsCard } from './client-diagnostics.jsx'
+
+const NS = 'settings.apophisCodeApi'
+const PROVIDER = 'apophiscode'
+const CHANNEL = '/apophiscode-api'
+const REFRESH_MS = 60_000
+/** Open the configured service's public site when a user needs an API key. */
+const INVITE_URL = 'https://www.apophis.uk/'
+/** How long after a search change the panel re-reads what DSH applied (the patch hot-reloads). */
+const SEARCH_SETTLE_MS = 1_500
+/** While the CLI installs, the panel polls its status this often. */
+const INSTALL_POLL_MS = 2_000
+const CLAUDE_MODELS = ['claude-opus-5-5', 'claude-sonnet-5-5', 'claude-haiku-5-5']
+const OWN_SEARCH_IDS = { auto: 'apophiscode-api-auto', apophiscode: 'apophiscode-api' }
+const FOREIGN_NAMES = { codex: 'Codex', kimi: 'Kimi' }
+/** The catalog's models by family, for the "reaches" line under each key. */
+const MODEL_FAMILIES = [
+  ['DeepSeek', ['deepseek-flash']],
+  ['GPT', ['gpt-6.1-sol', 'gpt-6-astra', 'gpt-5.6-sol']],
+  ['Grok', ['grok-4.7']],
+  ['Gemini', ['gemini-4-argon', 'gemini-3.8-flash']],
+  ['Claude', ['claude-opus-5-5', 'claude-sonnet-5-5', 'claude-haiku-5-5']],
+]
+
+// ── helpers ─────────────────────────────────────────────────────────────────
+
+/**
+ * The one way this bundle talks to the host. The transport drops an
+ * `undefined` payload and the channel's envelope requires the field, so every
+ * call carries an object.
+ */
+function channelCaller(rpc) {
+  return (endpoint, payload = {}, signal) => rpc.call(CHANNEL, endpoint, payload, signal).then(response => {
+    if (!response?.ok) throw new Error(response?.error?.message ?? 'ApophisCode RPC failed')
+    return response.value
+  })
+}
+
+const useCaller = rpc => react.useMemo(() => channelCaller(rpc), [rpc])
+
+function clearMessage(error) {
+  const text = typeof error?.message === 'string' && error.message.length > 0 ? error.message : String(error)
+  return text.length > 200 ? text.slice(0, 200) : text
+}
+
+/** Active key's usage row, preferring the key the ring currently points at. */
+function activeUsage(balance) {
+  if (balance === undefined) return undefined
+  return balance.keys?.find(entry => entry.id === balance.activeId) ?? balance.keys?.[0]
+}
+
+/** Which catalog families a key reaches, from its per-model coverage. */
+function reachOf(coverage) {
+  return MODEL_FAMILIES.flatMap(([name, models]) => {
+    const known = models.filter(id => typeof coverage?.[id] === 'boolean')
+    if (known.length === 0) return []
+    const reached = known.filter(id => coverage[id] === true)
+    const state = reached.length === 0 ? 'no' : reached.length === known.length ? 'ok' : 'partial'
+    return [{ name, state, reached, missing: known.filter(id => coverage[id] === false) }]
+  })
+}
+
+// ── primitives ──────────────────────────────────────────────────────────────
+
+function Card({ title, aside, children }) {
+  return (
+    <section className="apc-card">
+      <header className="apc-head">
+        <h3 className="apc-title">{title}</h3>
+        {aside}
+      </header>
+      {children}
+    </section>
+  )
+}
+
+function Button({ variant, size, children, ...rest }) {
+  return <button type="button" className="apc-btn" data-variant={variant} data-size={size} {...rest}>{children}</button>
+}
+
+function Segmented({ label, options, value, disabled, onChange }) {
+  return (
+    <div className="apc-seg" role="radiogroup" aria-label={label}>
+      {options.map(option => (
+        <button
+          type="button"
+          role="radio"
+          key={option.value}
+          aria-checked={value === option.value}
+          disabled={disabled}
+          onClick={() => value !== option.value && onChange(option.value)}
+        >
+          {option.label}
+        </button>
+      ))}
+    </div>
+  )
+}
+
+// ── accounts and keys ───────────────────────────────────────────────────────
+
+/** A key's groups and what they reach. */
+function KeyGroups({ group, descriptions, loading, t }) {
+  if (group === undefined) {
+    return loading ? <span className="apc-meta">{t('groupsChecking')}</span> : null
+  }
+  if (group.rejected === true) return <span className="apc-error">{t('groupsRejected')}</span>
+  const reach = reachOf(group.coverage)
+  const names = Array.isArray(group.groups) ? group.groups : []
+  return (
+    <>
+      <div className="apc-groups">
+        <span className="apc-label">{t('groupsTitle')}</span>
+        {names.length === 0
+          ? <span className="apc-meta">{group.error === undefined ? group.membershipUnavailable ? t('groupsMembershipUnavailable') : '—' : `${t('groupsUnknown')}: ${group.error}`}</span>
+          : names.map(name => <span className="apc-tag" key={name} title={descriptions?.[name] ?? name}>{name}</span>)}
+      </div>
+      {reach.length > 0 && (
+        <div className="apc-reach">
+          {reach.map(family => (
+            <span
+              key={family.name}
+              data-state={family.state}
+              title={[...family.reached.map(id => `✓ ${id}`), ...family.missing.map(id => `✗ ${id}`)].join('\n')}
+            >
+              {family.state === 'ok' ? '✓' : family.state === 'partial' ? '◐' : '✕'} {family.name}
+              {family.state === 'partial' && ` (${t('groupsPartial')})`}
+            </span>
+          ))}
+        </div>
+      )}
+      <ClaudeRoute group={group} t={t} />
+      {group.stale !== undefined && <span className="apc-warn">{`${t('groupsStale')}: ${group.stale.error}`}</span>}
+    </>
+  )
+}
+
+/** Which transport this key's Claude requests take, when the key reaches Claude. */
+function ClaudeRoute({ group, t }) {
+  const route = group.claudeTransport
+  if (route === undefined || !CLAUDE_MODELS.some(id => group.coverage?.[id] === true)) return null
+  const pinned = route.reason === 'preference' ? t('keyClaudePinned') : ''
+  const hint = route.transport === 'cli'
+    ? `${fill(t('keyClaudeCliHint'), { groups: (route.groups ?? []).join(' / ') || 'cc' })}${pinned}`
+    : `${t('keyClaudeHttpHint')}${pinned}`
+  return (
+    <div className="apc-groups">
+      <span className="apc-chip" data-tone={route.transport === 'cli' ? 'info' : 'neutral'} title={hint}>
+        {route.transport === 'cli' ? t('keyClaudeCli') : t('keyClaudeHttp')}
+      </span>
+    </div>
+  )
+}
+
+function KeyRow({ entry, row, group, descriptions, groupsLoading, busy, rename, onAction, t }) {
+  const editing = rename.renaming?.id === entry.id
+
+  return (
+    <div className="apc-row">
+      <div className="apc-row-top">
+        <span className="apc-row-name">
+          {editing
+            ? <KeyRenameForm rename={rename} busy={busy} t={t} />
+            : <span className="apc-name">{entry.label}</span>}
+          {entry.active && <span className="apc-chip" data-tone="success">{t('keyActive')}</span>}
+          {entry.disabled && <span className="apc-chip" data-tone="danger">{entry.disabledReason ? `${t('keyDisabled')} · ${entry.disabledReason}` : t('keyDisabled')}</span>}
+        </span>
+        {!editing && (
+          <span className="apc-actions">
+            {!entry.active && !entry.disabled && <Button disabled={busy} onClick={() => onAction('keys/select', { id: entry.id })}>{t('keyUse')}</Button>}
+            {entry.disabled && <Button disabled={busy} onClick={() => onAction('keys/enable', { id: entry.id })}>{t('keyEnable')}</Button>}
+            {!entry.disabled && <Button variant="ghost" disabled={busy} onClick={() => onAction('keys/disable', { id: entry.id })}>{t('keyDisable')}</Button>}
+            <Button variant="ghost" disabled={busy} onClick={() => rename.start(entry)}>{t('keyRename')}</Button>
+            <Button variant="danger" disabled={busy} onClick={() => onAction('keys/remove', { id: entry.id })}>{t('keyRemove')}</Button>
+          </span>
+        )}
+      </div>
+      <KeyBalance row={row} t={t} />
+      <KeyGroups group={group} descriptions={descriptions} loading={groupsLoading} t={t} />
+    </div>
+  )
+}
+
+/**
+ * Where to get a key, for a profile that has none. A new-window link: the
+ * desktop shell hands http(s) window opens to the system browser, and a web
+ * profile opens a new tab.
+ */
+function RegisterInvite({ t }) {
+  return (
+    <p className="apc-note">
+      {t('inviteLead')}{' '}
+      <a className="apc-link" href={INVITE_URL} target="_blank" rel="noopener noreferrer">{t('inviteLink')}</a>
+    </p>
+  )
+}
+
+function AccountsCard({ call, t }) {
+  const [status, setStatus] = react.useState()
+  const [balance, setBalance] = react.useState()
+  const [groups, setGroups] = react.useState()
+  const [groupsLoading, setGroupsLoading] = react.useState(true)
+  const [groupsError, setGroupsError] = react.useState()
+  const [busy, setBusy] = react.useState(false)
+  const [error, setError] = react.useState()
+  const [draft, setDraft] = react.useState({ key: '', label: '' })
+  const generation = react.useRef(0)
+
+  const readGroups = react.useCallback((force = false) => {
+    setGroupsLoading(true)
+    setGroupsError(undefined)
+    return call('groups', { force })
+      .then(setGroups)
+      .catch(failure => setGroupsError(clearMessage(failure)))
+      .finally(() => setGroupsLoading(false))
+  }, [call])
+
+  const load = react.useCallback((force = false) => {
+    const current = ++generation.current
+    setBusy(true)
+    setError(undefined)
+    void readGroups(force)
+    return Promise.all([call('status'), call('balance', { force })])
+      .then(([nextStatus, nextBalance]) => {
+        if (generation.current !== current) return
+        setStatus(nextStatus)
+        setBalance(nextBalance)
+      })
+      .catch(failure => {
+        if (generation.current === current) setError({ kind: 'read', message: clearMessage(failure) })
+      })
+      .finally(() => {
+        if (generation.current === current) setBusy(false)
+      })
+  }, [call, readGroups])
+
+  react.useEffect(() => {
+    load(false)
+    return () => {
+      generation.current += 1
+    }
+  }, [load])
+
+  /** A refused change says so; a balance read after a stored change is a read. */
+  const mutate = (endpoint, payload) => {
+    setBusy(true)
+    setError(undefined)
+    return call(endpoint, payload)
+      .then(
+        nextStatus => {
+          setStatus(nextStatus)
+          void readGroups(false)
+          return call('balance', { force: true })
+            .then(setBalance, failure => setError({ kind: 'read', message: clearMessage(failure) }))
+        },
+        failure => setError({ kind: 'save', message: clearMessage(failure) }),
+      )
+      .finally(() => setBusy(false))
+  }
+
+  const addKey = event => {
+    event.preventDefault()
+    if (draft.key.trim() === '') return
+    mutate('keys/add', { key: draft.key, label: draft.label }).then(() => setDraft({ key: '', label: '' }))
+  }
+
+  const rename = useKeyRename(({ id, label }) => mutate('keys/rename', { id, label }))
+
+  const keys = status?.keys ?? []
+  const rows = balance?.keys ?? []
+  return (
+    <Card
+      title={t('accountsTitle')}
+      aside={(
+        <span className="apc-actions">
+          <Button disabled={busy} onClick={() => load(true)}>{busy ? t('refreshing') : t('refresh')}</Button>
+          {keys.length > 0 && <Button variant="danger" disabled={busy} onClick={() => mutate('keys/remove-all', {})}>{t('removeAll')}</Button>}
+        </span>
+      )}
+    >
+      {keys.length === 0
+        ? (
+          <>
+            <p className="apc-note">{t('empty')}</p>
+            {/* Only once the host has answered: an unread or failed status says nothing about stored keys. */}
+            {status !== undefined && <RegisterInvite t={t} />}
+          </>
+        )
+        : (
+          <>
+            <div className="apc-list">
+              {keys.map(entry => (
+                <KeyRow
+                  key={entry.id}
+                  entry={entry}
+                  row={rows.find(row => row.id === entry.id)}
+                  group={groups?.keys?.find(group => group.id === entry.id)}
+                  descriptions={groups?.descriptions}
+                  groupsLoading={groupsLoading}
+                  busy={busy}
+                  rename={rename}
+                  onAction={mutate}
+                  t={t}
+                />
+              ))}
+            </div>
+            <p className="apc-note">{t('keysHint')}</p>
+          </>
+        )}
+      <form className="apc-add" onSubmit={addKey}>
+        <span className="apc-label">{t('addTitle')}</span>
+        <div className="apc-form">
+          <input
+            className="apc-input"
+            type="password"
+            autoComplete="off"
+            placeholder={t('addKeyPlaceholder')}
+            value={draft.key}
+            onChange={event => setDraft(current => ({ ...current, key: event.target.value }))}
+          />
+          <input
+            className="apc-input"
+            type="text"
+            placeholder={t('addLabelPlaceholder')}
+            value={draft.label}
+            onChange={event => setDraft(current => ({ ...current, label: event.target.value }))}
+          />
+          <Button type="submit" variant="primary" size="md" disabled={busy || draft.key.trim() === ''}>{t('add')}</Button>
+        </div>
+      </form>
+      {groupsError !== undefined && <p className="apc-error" role="alert">{`${t('groupsUnknown')}: ${groupsError}`}</p>}
+      {groups?.directoryError !== undefined && <p className="apc-warn">{`${t('groupsDirectoryFailed')}: ${groups.directoryError}`}</p>}
+      {groups?.directoryStale !== undefined && <p className="apc-warn">{`${t('groupsDirectoryStale')}: ${groups.directoryStale.error}`}</p>}
+      {status !== undefined && status.writable !== true && <p className="apc-note">{t('notWritable')}</p>}
+      {error !== undefined && <p className="apc-error" role="alert">{`${t(error.kind === 'save' ? 'saveError' : 'error')}: ${error.message}`}</p>}
+      <details className="apc-advanced">
+        <summary>{t('advanced')}</summary>
+        <label className="apc-field">
+          <span className="apc-label">{t('apiHost')}</span>
+          <input
+            className="apc-input"
+            type="text"
+            disabled={status?.writable !== true}
+            defaultValue={status?.hosts?.apiHost ?? ''}
+            onBlur={event => mutate('hosts/update', { apiHost: event.target.value, statusHost: status?.hosts?.statusHost })}
+          />
+        </label>
+        <label className="apc-field">
+          <span className="apc-label">{t('statusHost')}</span>
+          <input
+            className="apc-input"
+            type="text"
+            disabled={status?.writable !== true}
+            defaultValue={status?.hosts?.statusHost ?? ''}
+            onBlur={event => mutate('hosts/update', { statusHost: event.target.value, apiHost: status?.hosts?.apiHost })}
+          />
+        </label>
+      </details>
+    </Card>
+  )
+}
+
+// ── model visibility ────────────────────────────────────────────────────────
+
+function ModelsCard({ call, t }) {
+  const [state, setState] = react.useState()
+  const [busy, setBusy] = react.useState(false)
+  const [error, setError] = react.useState()
+
+  react.useEffect(() => {
+    let live = true
+    call('models/status').then(value => {
+      if (live) setState(value)
+    }).catch(failure => {
+      if (live) setError(clearMessage(failure))
+    })
+    return () => { live = false }
+  }, [call])
+
+  const models = state?.models ?? []
+  const selectedIds = models.filter(model => model.selected).map(model => model.id)
+  const disabled = busy || state?.writable !== true
+  const update = ids => {
+    if (disabled) return
+    setBusy(true)
+    setError(undefined)
+    call('models/update', { selectedIds: ids })
+      .then(setState)
+      .catch(failure => setError(clearMessage(failure)))
+      .finally(() => setBusy(false))
+  }
+
+  return (
+    <Card title={t('modelsTitle')} aside={state !== undefined && <span className="apc-meta">{fill(t('modelsCount'), { count: selectedIds.length, total: models.length })}</span>}>
+      <p className="apc-note">{t('modelsIntro')}</p>
+      {state === undefined && error === undefined && <p className="apc-note" role="status">{t('modelsChecking')}</p>}
+      {state !== undefined && (
+        <>
+          <div className="apc-actions">
+            <Button disabled={disabled || selectedIds.length === models.length} onClick={() => update(models.map(model => model.id))}>{t('modelsAll')}</Button>
+            <Button disabled={disabled || selectedIds.length === 0} onClick={() => update([])}>{t('modelsNone')}</Button>
+          </div>
+          <fieldset className="apc-models" aria-label={t('modelsTitle')} disabled={disabled}>
+            {models.map(model => (
+              <label key={model.id} className="apc-model">
+                <input
+                  type="checkbox"
+                  checked={model.selected}
+                  onChange={event => update(event.target.checked ? [...selectedIds, model.id] : selectedIds.filter(id => id !== model.id))}
+                />
+                <span><b>{model.name}</b><span className="apc-meta apc-mono">{model.id}</span>{model.unavailableReason && <span className="apc-error">{model.unavailableReason}</span>}</span>
+              </label>
+            ))}
+          </fieldset>
+          {selectedIds.length === 0 && <p className="apc-note">{t('modelsEmpty')}</p>}
+          {state.writable !== true && <p className="apc-note">{t('searchNotWritable')}</p>}
+        </>
+      )}
+      {error !== undefined && <p className="apc-error" role="alert">{`${t('modelsFailed')}: ${error}`}</p>}
+    </Card>
+  )
+}
+
+// ── web search ──────────────────────────────────────────────────────────────
+
+/** Web search routing and backend, written through the host. */
+function SearchCard({ call, t }) {
+  const [state, setState] = react.useState()
+  const [busy, setBusy] = react.useState(false)
+  const [error, setError] = react.useState()
+  const generation = react.useRef(0)
+
+  const read = react.useCallback(() => {
+    const current = ++generation.current
+    return call('search/status').then(value => {
+      if (generation.current === current) setState(value)
+    }).catch(failure => {
+      if (generation.current === current) setError(clearMessage(failure))
+    })
+  }, [call])
+
+  react.useEffect(() => {
+    read()
+    return () => {
+      generation.current += 1
+    }
+  }, [read])
+
+  const update = patch => {
+    if (busy || state?.writable !== true) return
+    setBusy(true)
+    setError(undefined)
+    call('search/update', patch)
+      .then(value => {
+        setState(value)
+        // The patch hot-applies after the write; read what DSH settled on.
+        window.setTimeout(() => {
+          read()
+        }, SEARCH_SETTLE_MS)
+      })
+      .catch(failure => setError(clearMessage(failure)))
+      .finally(() => setBusy(false))
+  }
+
+  const mode = state?.searchProvider
+  const backend = state?.searchBackend
+  const models = state?.models ?? {}
+  const base = state?.effective?.base
+  const runtime = state?.effective?.runtime
+  const foreign = Object.entries(state?.foreign ?? {}).filter(([, present]) => present).map(([name]) => FOREIGN_NAMES[name] ?? name)
+  const expected = OWN_SEARCH_IDS[mode]
+  const overridden = expected !== undefined && state?.applied?.state === 'applied' && base !== undefined && base !== expected
+  const disabled = busy || state?.writable !== true
+  const modeHint = { default: 'searchModeDefaultHint', auto: 'searchModeAutoHint', apophiscode: 'searchModeApophisCodeHint' }[mode]
+  const backendHint = backend === 'gpt'
+    ? fill(t('searchBackendGptHint'), { model: models.gpt ?? 'gpt-6.1-sol' })
+    : fill(t('searchBackendDeepseekHint'), { model: models.deepseek ?? 'deepseek-flash' })
+
+  return (
+    <Card title={t('searchTitle')} aside={<span className="apc-chip" data-tone="neutral">{t('searchScope')}</span>}>
+      <p className="apc-note">{t('searchIntro')}</p>
+      {state === undefined && error === undefined && <p className="apc-note" role="status">{t('searchChecking')}</p>}
+      {state !== undefined && (
+        <>
+          <div className="apc-setting">
+            <span className="apc-label">{t('searchModeTitle')}</span>
+            <div>
+              <Segmented
+                label={t('searchModeTitle')}
+                value={mode}
+                disabled={disabled}
+                onChange={value => update({ searchProvider: value })}
+                options={[
+                  { value: 'default', label: t('searchModeDefault') },
+                  { value: 'auto', label: t('searchModeAuto') },
+                  { value: 'apophiscode', label: t('searchModeApophisCode') },
+                ]}
+              />
+              {modeHint !== undefined && <p className="apc-note">{t(modeHint)}</p>}
+            </div>
+          </div>
+          <div className="apc-setting">
+            <span className="apc-label">{t('searchBackendTitle')}</span>
+            <div>
+              <Segmented
+                label={t('searchBackendTitle')}
+                value={backend}
+                disabled={disabled}
+                onChange={value => update({ searchBackend: value })}
+                options={[
+                  { value: 'deepseek', label: t('searchBackendDeepseek') },
+                  { value: 'gpt', label: t('searchBackendGpt') },
+                ]}
+              />
+              <p className="apc-note">{backendHint}</p>
+            </div>
+          </div>
+          {state.available === true && (base !== undefined || runtime !== undefined) && (
+            <div className="apc-status">
+              <span className="apc-dot" data-tone={overridden ? 'warn' : expected !== undefined && base === expected ? 'success' : undefined} />
+              <span className="apc-meta">{fill(t('searchEffective'), { base: base ?? t('searchUnknown'), runtime: runtime ?? base ?? t('searchUnknown') })}</span>
+            </div>
+          )}
+          {overridden && <p className="apc-warn">{fill(t('searchOverridden'), { base })}</p>}
+          {foreign.length > 0 && <p className="apc-note">{fill(t('searchForeign'), { names: foreign.join(' / ') })}</p>}
+          {state.applied?.state === 'failed' && <p className="apc-error" role="alert">{fill(t('searchApplyFailed'), { error: state.applied.error ?? '' })}</p>}
+          {state.available !== true && <p className="apc-note">{t('searchUnavailable')}</p>}
+          {state.writable !== true && <p className="apc-note">{t('searchNotWritable')}</p>}
+          <p className="apc-note">{t('searchPatchNote')}</p>
+        </>
+      )}
+      {error !== undefined && <p className="apc-error" role="alert">{`${t('searchLoadFailed')}: ${error}`}</p>}
+    </Card>
+  )
+}
+
+// ── Claude Code CLI ─────────────────────────────────────────────────────────
+
+const INSTALL_FAILURES = {
+  'npm-missing': () => 'cliNpmMissing',
+  permission: cli => (cli.platform === 'win32' ? 'cliPermissionWindows' : 'cliPermission'),
+  network: () => 'cliNetwork',
+  timeout: () => 'cliTimeout',
+  'not-found-after-install': () => 'cliNotFoundAfterInstall',
+}
+
+/** The sentence explaining a failed install, by the code the host classified. */
+function installFailure(cli, t) {
+  const key = INSTALL_FAILURES[cli.install?.code]?.(cli)
+  return key === undefined ? undefined : fill(t(key), { command: cli.command ?? '' })
+}
+
+/**
+ * Which route Claude requests take, whether this device has the Claude Code
+ * CLI for an explicitly selected CLI transport, and an installer if missing.
+ */
+function ClaudeCliCard({ call, t }) {
+  const [cli, setCli] = react.useState()
+  const [checking, setChecking] = react.useState(false)
+  const [saving, setSaving] = react.useState(false)
+  const [error, setError] = react.useState()
+
+  const check = react.useCallback((force = false) => {
+    setChecking(true)
+    setError(undefined)
+    return call('claude-cli/status', { force })
+      .then(setCli)
+      .catch(failure => setError(clearMessage(failure)))
+      .finally(() => setChecking(false))
+  }, [call])
+
+  react.useEffect(() => {
+    check(false)
+  }, [check])
+
+  const running = cli?.install?.state === 'running'
+  react.useEffect(() => {
+    if (!running) return undefined
+    let live = true
+    const timer = window.setInterval(() => {
+      call('claude-cli/status').then(value => {
+        if (live) setCli(value)
+      }).catch(() => undefined)
+    }, INSTALL_POLL_MS)
+    return () => {
+      live = false
+      window.clearInterval(timer)
+    }
+  }, [call, running])
+
+  const install = () => {
+    setError(undefined)
+    call('claude-cli/install').then(setCli).catch(failure => setError(clearMessage(failure)))
+  }
+  const choose = transport => {
+    setSaving(true)
+    setError(undefined)
+    call('claude-cli/update', { transport })
+      .then(setCli)
+      .catch(failure => setError(`${t('cliTransportFailed')}: ${clearMessage(failure)}`))
+      .finally(() => setSaving(false))
+  }
+
+  const usable = cli?.installed === true && cli.version !== undefined
+  const failed = cli?.install?.state === 'failed'
+  const failure = cli === undefined ? undefined : installFailure(cli, t)
+  const transport = cli?.transport ?? 'auto'
+  const processes = cli?.processes
+  return (
+    <Card
+      title={t('cliTitle')}
+      aside={<Button disabled={checking || running} onClick={() => check(true)}>{checking ? t('refreshing') : t('cliRecheck')}</Button>}
+    >
+      <p className="apc-note">{t('cliIntro')}</p>
+      {cli !== undefined && (
+        <div className="apc-setting">
+          <span className="apc-label">{t('cliTransportTitle')}</span>
+          <div>
+            <Segmented
+              label={t('cliTransportTitle')}
+              value={transport}
+              disabled={saving || cli.writable !== true}
+              onChange={choose}
+              options={[
+                { value: 'auto', label: t('cliTransportAuto') },
+                { value: 'cli', label: t('cliTransportCli') },
+                { value: 'http', label: t('cliTransportHttp') },
+              ]}
+            />
+            <p className="apc-note">{t({ auto: 'cliTransportAutoHint', cli: 'cliTransportCliHint', http: 'cliTransportHttpHint' }[transport] ?? 'cliTransportAutoHint')}</p>
+            {cli.writable !== true && <p className="apc-note">{t('cliTransportNotWritable')}</p>}
+          </div>
+        </div>
+      )}
+      {cli === undefined && error === undefined && <p className="apc-note">{t('cliChecking')}</p>}
+      {usable && (
+        <>
+          <div className="apc-status">
+            <span className="apc-dot" data-tone="success" />
+            <span>{t('cliInstalled')}</span>
+            <b>{`${t('cliVersion')} ${cli.version}`}</b>
+          </div>
+          <span className="apc-meta">{t('cliPath')} <span className="apc-mono">{cli.path}</span></span>
+          {processes !== undefined && <span className="apc-meta">{fill(t('cliProcesses'), processes)}</span>}
+          {cli.install?.state === 'succeeded' && <p className="apc-note">{t('cliInstallSucceeded')}</p>}
+        </>
+      )}
+      {cli !== undefined && !usable && (
+        <div className="apc-callout">
+          <div className="apc-status">
+            <span className="apc-dot" data-tone={cli.installed ? 'danger' : 'warn'} />
+            <b>{cli.installed ? t('cliBroken') : t('cliMissing')}</b>
+          </div>
+          {cli.installed && (
+            <>
+              <span className="apc-meta">{t('cliPath')} <span className="apc-mono">{cli.path}</span></span>
+              {cli.error !== undefined && <pre className="apc-detail">{cli.error}</pre>}
+            </>
+          )}
+          {cli.configuredPath !== undefined && <p className="apc-note">{fill(t('cliConfiguredMissing'), { path: cli.configuredPath })}</p>}
+          <p className="apc-note">{t('cliMissingHint')}</p>
+          <div className="apc-split">
+            <Button variant="primary" size="md" disabled={running || checking} onClick={install}>
+              {running ? t('cliInstalling') : cli.installed ? t('cliReinstall') : t('cliInstall')}
+            </Button>
+          </div>
+          <p className="apc-note">
+            {fill(t('cliInstallCommand'), { command: cli.command ?? '' })}
+            {cli.platform === 'win32' && ` ${t('cliWindowsNote')}`}
+          </p>
+        </div>
+      )}
+      {failed && !usable && (
+        <>
+          <p className="apc-error">{failure === undefined ? t('cliInstallFailed') : `${t('cliInstallFailed')} · ${failure}`}</p>
+          {cli.install.detail !== undefined && cli.install.detail !== '' && <pre className="apc-detail">{cli.install.detail}</pre>}
+        </>
+      )}
+      {error !== undefined && <p className="apc-error" role="alert">{`${t('error')}: ${error}`}</p>}
+    </Card>
+  )
+}
+
+// ── plugin version ──────────────────────────────────────────────────────────
+
+/** A release-age wait can end tomorrow, so the date is part of the time. */
+function readDateTime(ms) {
+  try { return new Date(ms).toLocaleString(undefined, { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }) }
+  catch { return new Date(ms).toISOString().slice(0, 16).replace('T', ' ') }
+}
+
+function VersionCard({ call, t }) {
+  const [info, setInfo] = react.useState()
+  const [loading, setLoading] = react.useState(true)
+  const [error, setError] = react.useState(false)
+  const [updating, setUpdating] = react.useState(false)
+  const [updateFailed, setUpdateFailed] = react.useState(false)
+  /** A version pnpm still holds back under the profile's release-age policy. */
+  const [pending, setPending] = react.useState()
+  const [updated, setUpdated] = react.useState()
+  const [restartHint, setRestartHint] = react.useState(false)
+  const generation = react.useRef(0)
+
+  const load = force => {
+    const current = ++generation.current
+    setLoading(true)
+    setError(false)
+    call('plugin/version', { force }).then(value => {
+      if (generation.current === current) setInfo(value)
+    }).catch(() => {
+      if (generation.current === current) setError(true)
+    }).finally(() => {
+      if (generation.current === current) setLoading(false)
+    })
+  }
+
+  react.useEffect(() => {
+    load(false)
+    return () => { generation.current += 1 }
+  }, [])
+
+  const update = () => {
+    setUpdating(true)
+    setUpdateFailed(false)
+    setPending(undefined)
+    call('plugin/update').then(value => {
+      if (value?.pending === true) {
+        setPending(value)
+        return
+      }
+      setUpdated(value)
+      setRestartHint(false)
+    }).catch(() => setUpdateFailed(true)).finally(() => setUpdating(false))
+  }
+
+  const installKind = info?.install?.kind
+  const showStatus = info !== undefined && updated === undefined
+  const canUpdate = showStatus && !info.restartRequired && info.onlineUpdates !== false && info.updateAvailable && installKind === 'npm'
+  return (
+    <Card
+      title={t('versionTitle')}
+      aside={(
+        <span className="apc-actions">
+          <a href="https://github.com/ApophisCode/dsh-apophiscode-api/releases" target="_blank" rel="noreferrer">{t('versionReleases')}</a>
+          {canUpdate && <Button variant="primary" disabled={loading || updating} onClick={update}>{updating ? t('versionUpdating') : t('versionUpdate')}</Button>}
+          {updated === undefined && <Button disabled={loading || updating} onClick={() => load(true)}>{loading ? t('versionChecking') : t('versionCheck')}</Button>}
+        </span>
+      )}
+    >
+      {loading && info === undefined && <p className="apc-note" role="status">{t('versionChecking')}</p>}
+      {error && <p className="apc-error" role="alert">{t('versionFailed')}</p>}
+      {showStatus && (
+        <div className="apc-status" role="status">
+          <span className="apc-dot" data-tone={info.updateAvailable || info.restartRequired || info.published === false ? 'warn' : 'success'} />
+          <b>{`v${info.current}`}</b>
+          <span className="apc-meta">
+            {info.restartRequired ? fill(t('versionInstalledPending'), { version: info.installed }) : info.onlineUpdates === false ? t('versionLocal') : info.published === false ? t('versionUnpublished') : info.updateAvailable ? fill(t('versionAvailable'), { version: info.latest }) : t('versionUpToDate')}
+            {info.updateAvailable && ` · ${t('versionLatest')} v${info.latest}`}
+          </span>
+        </div>
+      )}
+      {showStatus && installKind === 'link' && <p className="apc-note">{t('versionLinked')}</p>}
+      {showStatus && info.updateAvailable && installKind === 'unknown' && <p className="apc-note">{t('versionManual')}</p>}
+      {updateFailed && <p className="apc-error" role="alert">{t('versionUpdateFailed')}</p>}
+      {pending !== undefined && <p className="apc-note" role="status">{typeof pending.availableAt === 'number'
+        ? fill(t('versionCoolingUntil'), { version: pending.version, time: readDateTime(pending.availableAt) })
+        : fill(t('versionCooling'), { version: pending.version })}</p>}
+      {updated !== undefined && (
+        <div className="apc-callout" data-tone="info" role="status">
+          <b className="apc-title">{fill(t('versionUpdated'), { version: updated.version })}</b>
+          <p className="apc-note">{t('versionUpdatedHint')}</p>
+          {restartHint && <p className="apc-note">{t('versionRestartHint')}</p>}
+          <div className="apc-actions">
+            <Button variant="primary" onClick={() => window.location.reload()}>{t('versionRefresh')}</Button>
+            <Button onClick={() => setRestartHint(true)}>{t('versionRestart')}</Button>
+            <Button variant="ghost" onClick={() => { setUpdated(undefined); load(true) }}>{t('versionLater')}</Button>
+          </div>
+        </div>
+      )}
+    </Card>
+  )
+}
+
+// ── the page and the composer chip ──────────────────────────────────────────
+
+function ApophisCodeSection({ rpc, t }) {
+  const call = useCaller(rpc)
+  return (
+    <div className="apc">
+      <p className="apc-intro">{t('intro')}</p>
+      <AccountsCard call={call} t={t} />
+      <ApophisCodeImagesCard call={call} t={t} />
+      <ClaudeCliCard call={call} t={t} />
+      <ModelsCard call={call} t={t} />
+      <SearchCard call={call} t={t} />
+      <VersionCard call={call} t={t} />
+      <DiagnosticsCard call={call} t={t} />
+    </div>
+  )
+}
+
+function ApophisCodeComposerQuota({ rpc, t, directory }) {
+  const call = useCaller(rpc)
+  const snapshot = react.useSyncExternalStore(
+    listener => directory.subscribe(listener),
+    () => directory.getSnapshot(),
+  )
+  const enabled = snapshot?.current?.provider === PROVIDER
+  const [balance, setBalance] = react.useState()
+  const refresh = react.useRef(() => {})
+
+  react.useEffect(() => {
+    if (!enabled) {
+      setBalance(undefined)
+      return undefined
+    }
+    let live = true
+    let pending = false
+    // Hovering the figure asks for the host's cached balance as well; one read at a time.
+    const tick = () => {
+      if (pending) return
+      pending = true
+      call('balance').then(value => {
+        if (live) setBalance(value)
+      }).catch(() => {
+        if (live) setBalance(undefined)
+      }).finally(() => {
+        pending = false
+      })
+    }
+    refresh.current = tick
+    tick()
+    const timer = window.setInterval(tick, REFRESH_MS)
+    return () => {
+      live = false
+      refresh.current = () => {}
+      window.clearInterval(timer)
+    }
+  }, [call, enabled])
+
+  if (!enabled || balance === undefined) return null
+  const row = activeUsage(balance)
+  // A key whose balance read failed is still usable; say the read failed
+  // instead of claiming there is no key.
+  return (
+    <QuotaHover
+      row={row}
+      fetchedAt={balance.fetchedAt}
+      empty={row?.error === undefined ? t('composerNoKey') : t('composerUnread')}
+      copy={{ title: t('composerLabel'), key: t('composerKey'), failed: t('composerUnread') }}
+      align="end"
+      onRefresh={() => refresh.current()}
+      t={t}
+    />
+  )
+}
+
+export const inject = ['slots', 'locale', 'connection', 'modelDirectories']
+
+export function apply(ctx) {
+  ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'apophiscode-api: copy')
+  ctx.effect(() => {
+    const tag = document.createElement('style')
+    tag.dataset.plugin = 'dsh-apophiscode-api'
+    tag.textContent = STYLE
+    document.head.append(tag)
+    return () => tag.remove()
+  }, 'apophiscode-api: style')
+  const connection = ctx.get('connection')
+  const t = ctx.locale.bind(NS)
+  const call = channelCaller(connection.rpc)
+  installImagePresentation(ctx, t, call)
+  ctx.slots.inject('settings.section', () => ctx.slots.register({
+    name: 'settings.section',
+    id: 'apophiscode-api',
+    order: 17,
+    label: () => t('nav'),
+    locale: NS,
+    inject: () => ({ rpc: connection.rpc, t }),
+  }, ApophisCodeSection))
+  ctx.slots.inject('conversation.input.right', () => ctx.slots.register({
+    name: 'conversation.input.right',
+    id: 'apophiscode-api-balance',
+    order: 17,
+    locale: NS,
+    inject: sessionId => ({
+      rpc: connection.rpc,
+      t,
+      directory: ctx.modelDirectories.directoryFor(sessionId).store,
+    }),
+  }, ApophisCodeComposerQuota))
+  ctx.inject(['sessions', 'conversation'], scope => {
+    const sessions = scope.get('sessions')
+    const conversation = scope.get('conversation')
+    if (typeof sessions?.scope !== 'function' || typeof conversation?.input?.for !== 'function') return
+    scope.slots.inject('conversation.input.left', () => scope.slots.register({
+      name: 'conversation.input.left', id: 'apophiscode-image-create', order: 31,
+      inject: sessionId => ({
+        call, t, directory: ctx.modelDirectories.directoryFor(sessionId).store,
+        prepare: text => {
+          const session = sessions.scope(sessionId)
+          if (session === undefined) throw new Error('Composer unavailable')
+          const input = conversation.input.for(session)
+          const draft = input.state.getSnapshot()
+          if (draft.phase !== 'plain' || draft.occurrences?.length) throw new Error('Composer busy')
+          input.setDraft([draft.draft, text].filter(Boolean).join('\n\n'))
+        },
+      }),
+    }, ApophisCodeImageShortcut))
+  })
+}

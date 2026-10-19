@@ -1,0 +1,119 @@
+import assert from 'node:assert/strict'
+import test from 'node:test'
+
+import { isQuotaExceededError } from '@deepseek-ai/dsh-llm'
+
+import {
+  CLIENT_POLICY_FAILURE,
+  INVALID_KEY_FAILURE,
+  QUOTA_FAILURE,
+  classifyClientPolicy,
+  classifyGatewayFailure,
+  classifyTestMessagePolicy,
+  explainTestMessagePolicyFailure,
+  explainClientPolicyFailure,
+  normalizeFailureMessage,
+} from '../src/failures.js'
+
+const AUTH_STATUS = /\b(?:401|403)\b/u
+/** Every wording the harness routes somewhere other than a plain failure. */
+const OTHER_CLASSES = [
+  /\b(?:401|403)\b/u,
+  /\b429\b|rate.?limit/iu,
+  /\b413\b|payload too large|request body too large/iu,
+  /\b400\b|invalid.?request/iu,
+  /\b5\d\d\b/u,
+  /\btime(?:d)?\s*out\b|timeout/iu,
+  /stream ended (?:before|without)\b/iu,
+  /\b(?:network|connection|socket|fetch)\b|\bECONN[A-Z]+\b|\bterminated\b|premature close/iu,
+]
+
+test('the already-authorized test-message refusal is a narrow content-policy category', () => {
+  const raw = "403 Your client is already connected and authorized. Please use it normally. There is no need to send test messages such as 'hi' or 'hello' to verify the connection."
+  assert.equal(classifyTestMessagePolicy(raw), true)
+  assert.equal(classifyGatewayFailure(raw), undefined)
+  assert.equal(classifyClientPolicy(raw), false)
+  const explanation = explainTestMessagePolicyFailure()
+  assert.equal(classifyTestMessagePolicy(explanation), true)
+  for (const pattern of OTHER_CLASSES) assert.equal(pattern.test(explanation), false)
+  for (const other of ['403 invalid API key', '403 insufficient quota', '429 rate limit', 'Your client is already connected and authorized.', 'There is no need to send test messages.', undefined]) {
+    assert.equal(classifyTestMessagePolicy(other), false)
+  }
+})
+
+test('recognizes an exhausted key from the gateway wording', () => {
+  assert.equal(classifyGatewayFailure('402 {"error":{"message":"当前令牌额度已用完"}}'), QUOTA_FAILURE)
+  assert.equal(classifyGatewayFailure('insufficient quota'), QUOTA_FAILURE)
+  assert.equal(classifyGatewayFailure('余额不足，请充值'), QUOTA_FAILURE)
+})
+
+test('recognizes a rejected key from its status or wording', () => {
+  assert.equal(classifyGatewayFailure('401 {"error":{"message":"无效的令牌"}}'), INVALID_KEY_FAILURE)
+  assert.equal(classifyGatewayFailure('invalid api key'), INVALID_KEY_FAILURE)
+  assert.equal(classifyGatewayFailure('api key is invalid'), INVALID_KEY_FAILURE)
+})
+
+test('leaves transient gateway faults to the key it already used', () => {
+  const channelFault = '400 {"error":{"code":"model_not_found","message":"当前令牌未覆盖供应商 \\"Anthropic\\"（模型=claude-opus-5-5）"}}'
+  assert.equal(classifyGatewayFailure(channelFault), undefined)
+  assert.equal(classifyGatewayFailure('503 {"error":{"message":"分组 cc-sale 下模型 claude-opus-5-5 无可用渠道"}}'), undefined)
+  assert.equal(classifyGatewayFailure(''), undefined)
+  assert.equal(classifyGatewayFailure(undefined), undefined)
+})
+
+test('a normalized quota failure lands in the harness quota category', () => {
+  const raw = '403 {"error":{"message":"当前令牌额度已用完 (request id: 01M4)"}}'
+  const kind = classifyGatewayFailure(raw)
+  assert.equal(kind, QUOTA_FAILURE)
+  const normalized = normalizeFailureMessage(raw, kind)
+  assert.equal(isQuotaExceededError(normalized), true)
+  // The gateway's 403 must not send this into the auth category first.
+  assert.equal(AUTH_STATUS.test(normalized), false)
+  // The gateway's own sentence survives, so the user sees what happened.
+  assert.match(normalized, /当前令牌额度已用完/u)
+  assert.match(normalized, /trying the next key/u)
+})
+
+test('a normalized key rejection lands in the harness auth category', () => {
+  const raw = '{"error":{"message":"无效的令牌 (request id: 01M4)"}}'
+  const kind = classifyGatewayFailure(raw)
+  assert.equal(kind, INVALID_KEY_FAILURE)
+  const normalized = normalizeFailureMessage(raw, kind)
+  assert.equal(AUTH_STATUS.test(normalized), true)
+  assert.equal(isQuotaExceededError(normalized), false)
+  assert.match(normalized, /invalid_authentication/u)
+})
+
+test('a client-policy refusal is never blamed on the key', () => {
+  const claude = '403 {"error":{"type":"gateway_api_error","message":"This API endpoint is only accessible via the official Claude CLI (request id: 01M4Q6FJ05BX8Z4SWZ01RXSNSS)"}}'
+  const codex = '403 {"error":{"message":"我们检测到您的客户端存在异常，请使用标准 Codex 客户端请求，请避免任何基于我方 API 二次分发的 API 转接接入。"}}'
+  for (const raw of [claude, codex]) {
+    assert.equal(classifyClientPolicy(raw), true)
+    // Not a key fault: nothing may disable or rotate a key for this.
+    assert.equal(classifyGatewayFailure(raw), undefined)
+  }
+})
+
+test('the policy explanation reaches the user instead of an API-key error', () => {
+  const raw = '403 {"error":{"message":"This API endpoint is only accessible via the official Claude CLI"}}'
+  const normalized = normalizeFailureMessage(raw, CLIENT_POLICY_FAILURE)
+  assert.equal(normalized, explainClientPolicyFailure(raw))
+  assert.match(normalized, /不能证明 API Key 失效/u)
+  assert.match(normalized, /不能确定当前分组的调用要求/u)
+  assert.match(normalized, /only accessible via the official Claude CLI/u)
+  assert.doesNotMatch(normalized, /cc-sale|gpt-6\.1-sol|deepseek-flash/u)
+  // The same anomaly refusal has also been observed with accepted requests;
+  // classification must not promise that every future attempt will fail.
+  assert.doesNotMatch(normalized, /重试也不会成功|retrying cannot help/iu)
+  // It must not read as any category the retry policy re-runs.
+  assert.equal(isQuotaExceededError(normalized), false)
+  for (const pattern of OTHER_CLASSES) {
+    assert.equal(pattern.test(normalized), false, `${pattern} must not match the policy sentence`)
+  }
+})
+
+test('the upstream wording for a Claude Code-only route is a client-policy refusal, not a key fault', () => {
+  const raw = '403 {"error":{"type":"gateway_unknown_error","message":"Request blocked: this endpoint only accepts requests from the official Claude Code CLI. (request id: x)"}}'
+  assert.equal(classifyClientPolicy(raw), true)
+  assert.equal(classifyGatewayFailure(raw), undefined)
+})

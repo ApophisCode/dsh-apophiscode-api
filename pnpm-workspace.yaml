@@ -1,0 +1,2 @@
+patchedDependencies:
+  '@google/genai@2.21.0': patches/@google__genai@2.21.0.patch

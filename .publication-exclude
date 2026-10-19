@@ -1,0 +1,13 @@
+{
+  "directories": [
+    ".scratch/",
+    "docs/releases/",
+    "docs/research/"
+  ],
+  "files": [
+    "docs/requirements.md",
+    "docs/agents/issue-tracker.md",
+    "docs/assets/sponsor-wechat.png",
+    "docs/assets/sponsor-alipay.png"
+  ]
+}

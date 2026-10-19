@@ -1,0 +1,14 @@
+node_modules/
+.artifacts/
+*.tgz
+.DS_Store
+lib/client.js.map
+
+# Local reference material and task history are excluded from publication.
+/.scratch/
+/docs/releases/
+/docs/research/
+/docs/requirements.md
+/docs/agents/issue-tracker.md
+/docs/assets/sponsor-wechat.png
+/docs/assets/sponsor-alipay.png

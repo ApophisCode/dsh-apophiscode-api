@@ -1,0 +1,108 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Stable version matching package.json (for example 0.1.4)
+        required: true
+        type: string
+      mode:
+        description: Prepare only, publish via OIDC, or finish a previously published npm version
+        required: true
+        default: prepare
+        type: choice
+        options: [prepare, publish, release-existing]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: apophiscode-release
+  cancel-in-progress: false
+
+env:
+  RELEASE_VERSION: ${{ inputs.version }}
+
+jobs:
+  prepare:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.32.1
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.13.0
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run check
+      - name: Verify generated bundles and release metadata
+        run: |
+          git diff --exit-code -- lib
+          node scripts/release-preflight.mjs "$RELEASE_VERSION"
+          tags=$(git ls-remote --tags origin "refs/tags/v$RELEASE_VERSION")
+          if [ -n "$tags" ]; then
+            echo 'Tag already exists; inspect it before preparing another release.' >&2
+            exit 1
+          fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ inputs.version }}
+          path: .artifacts/release/${{ inputs.version }}/
+          if-no-files-found: error
+
+  publish:
+    needs: prepare
+    if: inputs.mode == 'publish'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-${{ inputs.version }}
+          path: release
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.13.0
+      - run: npm install --global npm@11.21.0 --registry=https://registry.npmjs.org/
+      - name: Publish the verified tarball with Trusted Publishing
+        working-directory: release
+        run: |
+          sha256sum --check SHA256SUMS
+          npm publish "dsh-apophiscode-api-$RELEASE_VERSION.tgz" --access public --tag latest --provenance --registry=https://registry.npmjs.org/
+
+  release:
+    needs: [prepare, publish]
+    if: always() && needs.prepare.result == 'success' && (needs.publish.result == 'success' || inputs.mode == 'release-existing')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.13.0
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-${{ inputs.version }}
+          path: release
+      - name: Verify npm and create the matching GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          cd release
+          sha256sum --check SHA256SUMS
+          cd ..
+          node scripts/verify-registry-release.mjs "$RELEASE_VERSION" "release/dsh-apophiscode-api-$RELEASE_VERSION.tgz"
+          tags=$(git ls-remote --tags origin "refs/tags/v$RELEASE_VERSION")
+          if [ -n "$tags" ]; then
+            echo 'Tag already exists; refusing to overwrite it. Inspect and recover manually.' >&2
+            exit 1
+          fi
+          gh release create "v$RELEASE_VERSION" "release/dsh-apophiscode-api-$RELEASE_VERSION.tgz" release/SHA256SUMS --target "$GITHUB_SHA" --title "$(cat release/title.txt)" --notes-file release/notes.md --latest

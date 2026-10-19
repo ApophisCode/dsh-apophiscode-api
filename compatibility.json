@@ -1,0 +1,21 @@
+{
+  "latestTested": "0.2.1-rc.2",
+  "latestTestedScope": "Offline host packages and prepared 0.1.4 source/package; development-time real DSH chat for two exact DeepSeek IDs. Real 0.1.4 npm DSH installation and live update remain unverified.",
+  "acceptedRuntimeRange": ">=0.1.5-rc.1 <0.3.0-0",
+  "supported": [
+    "0.2.0-rc.2",
+    "0.2.1-rc.2"
+  ],
+  "piAi": "1.1.0",
+  "validation": {
+    "date": "2026-10-19",
+    "project": "dsh-apophiscode-api",
+    "targetDsh": "0.2.1-rc.2 (profile web)",
+    "offline": "576/576 full check; registered adapter, ToolRuntime, Cordis/HostConnection and client packages for 0.2.0-rc.2/0.2.1-rc.2. Unpacked transport boundaries 6/6; original development regressions 79/79 locally. See docs/validation.md.",
+    "liveGateway": "Partial: model lists and usage succeeded. Real DSH chat received normal replies from deepseek-v4.1-flash and deepseek-v4-pro; deepseek-v4-flash returned 404/model_not_found, deepseek-v4-flash-0731 retried 503, and deepseek-flash was stopped without a final answer. No claim that every listed model is callable.",
+    "runningDsh": "Development-time local DSH chat and tools verified for deepseek-v4.1-flash/deepseek-v4-pro. No claim that current 0.1.4 is installed or loaded in the user's DSH.",
+    "googleTransport": "Locally bundled pi-ai 1.1.0 native Google API and patched @google/genai 2.21.0 reject redirects and preserve framed SSE error status/reasons. Version/hash/patch and bundle checks fail closed. No host SDK patch or global fetch patch is required; both Gemini models have built-adapter local-server regressions and DSH 0.2.0-rc.2 adapter/tool loops.",
+    "report": "docs/validation.md",
+    "distribution": "0.1.4 prepared locally; official npm/latest, provenance and matching GitHub tag/Release must be verified after publication. No real npm DSH installation or cross-version update performed."
+  }
+}

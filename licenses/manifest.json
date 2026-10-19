@@ -1,0 +1,205 @@
+[
+  {
+    "name": "@earendil-works/pi-ai",
+    "version": "1.1.0",
+    "license": "MIT",
+    "file": "licenses/earendil-works-pi-ai-1.1.0.LICENSE",
+    "sha256": "0457f5bcec3b3b211605dfb5d1a49042fd638f3686a410fe099c24a25af13c48"
+  },
+  {
+    "name": "@google/genai",
+    "version": "2.21.0",
+    "license": "Apache-2.0",
+    "file": "licenses/google-genai-2.21.0.LICENSE",
+    "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+  },
+  {
+    "name": "agent-base",
+    "version": "7.1.4",
+    "license": "MIT",
+    "file": "licenses/agent-base-7.1.4.LICENSE",
+    "sha256": "8d8c55319c7729d57be811c747452636688d54f19701ee0752b6b15ad3771d9a"
+  },
+  {
+    "name": "base64-js",
+    "version": "1.5.1",
+    "license": "MIT",
+    "file": "licenses/base64-js-1.5.1.LICENSE",
+    "sha256": "5b37224c080cdcc97c871ada971c224e9926370fe74f11b539aa1cf9f3b1aca1"
+  },
+  {
+    "name": "bignumber.js",
+    "version": "9.3.1",
+    "license": "MIT",
+    "file": "licenses/bignumber.js-9.3.1.LICENSE",
+    "sha256": "def75ba75d6426f1c3f02addf8e175fbe6e0d8a82e541cbdffc16d2bd8fd7d6a"
+  },
+  {
+    "name": "buffer-equal-constant-time",
+    "version": "1.0.1",
+    "license": "BSD-3-Clause",
+    "file": "licenses/buffer-equal-constant-time-1.0.1.LICENSE",
+    "sha256": "751d0e80fb5c828f8c3de198cc760e1e05377e47c8263ab6ee2f10cdc19ba658"
+  },
+  {
+    "name": "data-uri-to-buffer",
+    "version": "4.0.1",
+    "license": "MIT",
+    "file": "licenses/data-uri-to-buffer-4.0.1.LICENSE",
+    "sha256": "040e792a7301d88d40d6fe798d7dd873a74fc9c45eaf9cd637df1416469d37a1"
+  },
+  {
+    "name": "debug",
+    "version": "4.4.3",
+    "license": "MIT",
+    "file": "licenses/debug-4.4.3.LICENSE",
+    "sha256": "3a61c6c96caf5c1d9b623fb9b04c822b783dfcb78aa7e49c76a3f643e6ed7f95"
+  },
+  {
+    "name": "ecdsa-sig-formatter",
+    "version": "1.0.11",
+    "license": "Apache-2.0",
+    "file": "licenses/ecdsa-sig-formatter-1.0.11.LICENSE",
+    "sha256": "50a6b24f8defc31a078aa9799a91d776f83948071574854f12473362aee74d0d"
+  },
+  {
+    "name": "extend",
+    "version": "3.0.2",
+    "license": "MIT",
+    "file": "licenses/extend-3.0.2.LICENSE",
+    "sha256": "97af7428f93afbab9bf79cd09254da1357161794f4255eb1b4599f04dd2d2e7c"
+  },
+  {
+    "name": "fetch-blob",
+    "version": "3.2.0",
+    "license": "MIT",
+    "file": "licenses/fetch-blob-3.2.0.LICENSE",
+    "sha256": "a5edccac92c3aa845694dcfaa72a0c098c1ae40d5ca6a37e4e59d778cf8e29bd"
+  },
+  {
+    "name": "formdata-polyfill",
+    "version": "4.0.10",
+    "license": "MIT",
+    "file": "licenses/formdata-polyfill-4.0.10.LICENSE",
+    "sha256": "435a6437e47e5e479942255680e7fbe5f333d55234ada1c35f6115ca641d5bb4"
+  },
+  {
+    "name": "gaxios",
+    "version": "7.3.1",
+    "license": "Apache-2.0",
+    "file": "licenses/gaxios-7.3.1.LICENSE",
+    "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+  },
+  {
+    "name": "gcp-metadata",
+    "version": "8.1.2",
+    "license": "Apache-2.0",
+    "file": "licenses/gcp-metadata-8.1.2.LICENSE",
+    "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+  },
+  {
+    "name": "google-auth-library",
+    "version": "10.9.1",
+    "license": "Apache-2.0",
+    "file": "licenses/google-auth-library-10.9.1.LICENSE",
+    "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+  },
+  {
+    "name": "google-logging-utils",
+    "version": "1.1.3",
+    "license": "Apache-2.0",
+    "file": "licenses/google-logging-utils-1.1.3.LICENSE",
+    "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+  },
+  {
+    "name": "https-proxy-agent",
+    "version": "7.0.6",
+    "license": "MIT",
+    "file": "licenses/https-proxy-agent-7.0.6.LICENSE",
+    "sha256": "8d8c55319c7729d57be811c747452636688d54f19701ee0752b6b15ad3771d9a"
+  },
+  {
+    "name": "json-bigint",
+    "version": "1.0.0",
+    "license": "MIT",
+    "file": "licenses/json-bigint-1.0.0.LICENSE",
+    "sha256": "def82c085d05e795fe6a9cb5b70c48e022212355afc0e91d4de047cade28df06"
+  },
+  {
+    "name": "jwa",
+    "version": "2.0.1",
+    "license": "MIT",
+    "file": "licenses/jwa-2.0.1.LICENSE",
+    "sha256": "3320319f8a5f42bc4254e65471eca7a5ea4dc8c883c4c24b4868e36b14890bcf"
+  },
+  {
+    "name": "jws",
+    "version": "4.0.1",
+    "license": "MIT",
+    "file": "licenses/jws-4.0.1.LICENSE",
+    "sha256": "3320319f8a5f42bc4254e65471eca7a5ea4dc8c883c4c24b4868e36b14890bcf"
+  },
+  {
+    "name": "ms",
+    "version": "2.1.3",
+    "license": "MIT",
+    "file": "licenses/ms-2.1.3.LICENSE",
+    "sha256": "1662fae9b5314d11cf51284e2dcd1f006a354f7343f08712a730fcff9a359801"
+  },
+  {
+    "name": "node-domexception",
+    "version": "1.0.0",
+    "license": "MIT",
+    "file": "licenses/node-domexception-1.0.0.LICENSE",
+    "sha256": "8ec1386f7f078b0c7cd25341cd80f332df902371cda9f40c10ec2b4007b420b7"
+  },
+  {
+    "name": "node-fetch",
+    "version": "3.3.2",
+    "license": "MIT",
+    "file": "licenses/node-fetch-3.3.2.LICENSE",
+    "sha256": "3e2c11dcf3f17ab585baab8faba54772d7872f1c6e026022acd4b4006665efb0"
+  },
+  {
+    "name": "p-retry",
+    "version": "4.6.2",
+    "license": "MIT",
+    "file": "licenses/p-retry-4.6.2.LICENSE",
+    "sha256": "48da2f39e100d4085767e94966b43f4fa95ff6a0698fba57ed460914e35f94a0"
+  },
+  {
+    "name": "retry",
+    "version": "0.13.1",
+    "license": "MIT",
+    "file": "licenses/retry-0.13.1.LICENSE",
+    "sha256": "01ad164273e8e095abc9dbd1c21e194594a671af7d528cb43ee7b4c903ba7da3"
+  },
+  {
+    "name": "rolldown",
+    "version": "1.1.5",
+    "license": "MIT",
+    "file": "licenses/rolldown-1.1.5.LICENSE",
+    "sha256": "23ecfff35a5a2e80d92142f75228912c3b1abc4b5a8337a821ff4397e2f9f734"
+  },
+  {
+    "name": "safe-buffer",
+    "version": "5.2.1",
+    "license": "MIT",
+    "file": "licenses/safe-buffer-5.2.1.LICENSE",
+    "sha256": "c7cc929b57080f4b9d0c6cf57669f0463fc5b39906344dfc8d3bc43426b30eac"
+  },
+  {
+    "name": "web-streams-polyfill",
+    "version": "3.3.3",
+    "license": "MIT",
+    "file": "licenses/web-streams-polyfill-3.3.3.LICENSE",
+    "sha256": "81008a3fb78f69f3c4a72a9e005c8582342ab62864371b3ab8e1b6af9041e080"
+  },
+  {
+    "name": "ws",
+    "version": "8.22.0",
+    "license": "MIT",
+    "file": "licenses/ws-8.22.0.LICENSE",
+    "sha256": "2b29dcfe0d6471f7e8c92c5fb38c9f93edee10330937055440192f1832b1ecef"
+  }
+]

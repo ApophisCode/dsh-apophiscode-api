@@ -1,0 +1,30 @@
+diff --git a/dist/node/index.mjs b/dist/node/index.mjs
+index 30301e7010241b287cc4aa5a9f4898f49748458d..cfd17bf7ec78092c57c787d8106d4e8389a42716 100644
+--- a/dist/node/index.mjs
++++ b/dist/node/index.mjs
+@@ -13845,6 +13845,16 @@ class ApiClient {
+                             const processedChunkString = trimmedEvent
+                                 .substring(dataPrefix.length)
+                                 .trim();
++                            // ApophisCode local patch: preserve framed gateway errors before response projection.
++                            const streamChunk = JSON.parse(processedChunkString);
++                            if (streamChunk !== null && typeof streamChunk === 'object' && 'error' in streamChunk) {
++                                const code = streamChunk.error?.code;
++                                const message = JSON.stringify(streamChunk);
++                                if (Number.isInteger(code) && code >= 400 && code < 600) {
++                                    throw new ApiError({ status: code, message: `${code}: ${message}` });
++                                }
++                                throw new Error(`Google stream error: ${message}`);
++                            }
+                             try {
+                                 const partialResponse = new Response(processedChunkString, {
+                                     headers: response === null || response === void 0 ? void 0 : response.headers,
+@@ -13874,7 +13884,7 @@ class ApiClient {
+             const attempt = createAttemptSignal(timeout, abortSignal);
+             let response;
+             try {
+-                response = await fetch(url, Object.assign(Object.assign({}, requestInit), { signal: attempt.signal }));
++                response = await fetch(url, Object.assign(Object.assign({}, requestInit), { signal: attempt.signal, redirect: 'error' }));
+             }
+             catch (e) {
+                 attempt.dispose();

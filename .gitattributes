@@ -1,0 +1,11 @@
+* text=auto eol=lf
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.webp binary
+*.gif binary
+*.tgz binary
+# Generated bundles preserve third-party code and comments verbatim.
+lib/*.js whitespace=-blank-at-eol
+# Preserve the exact copied third-party license texts.
+licenses/*.LICENSE -text whitespace=-blank-at-eol,-blank-at-eof
