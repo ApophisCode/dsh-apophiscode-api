@@ -1,6 +1,6 @@
 {
   "latestTested": "0.2.1-rc.2",
-  "latestTestedScope": "Offline host packages and 0.1.6 release-candidate source/package; development-time real DSH chat for two exact DeepSeek IDs. Real npm DSH installation and live update remain unverified.",
+  "latestTestedScope": "Offline host packages and published 0.1.6 source/package, with native Windows/Linux/macOS updater process checks; development-time real DSH chat for two exact DeepSeek IDs. Real npm DSH installation and live update remain unverified.",
   "acceptedRuntimeRange": ">=0.1.5-rc.1 <0.3.0-0",
   "supported": [
     "0.2.0-rc.2",
@@ -11,11 +11,11 @@
     "date": "2026-10-20",
     "project": "dsh-apophiscode-api",
     "targetDsh": "0.2.1-rc.2 (profile web)",
-    "offline": "605/605 Windows local and Ubuntu CI full checks, including 11 real-process/RPC updater regressions, 8 localized update-error UI regressions and 10 active-key settings refresh regressions through built client, registered RPC and real LlmRuntime; registered adapter, ToolRuntime, Cordis/HostConnection and client packages for 0.2.0-rc.2/0.2.1-rc.2. Native Windows/Linux/macOS updater checks each passed 11/11 at 0142ce69b17c424c2d16e032e8eea9bd5efb3383 in CI run 39359303808. Version 0.1.6 is being prepared. Published 0.1.5 was checked at 586/586. Historical unpacked transport boundaries 6/6 and original development regressions 79/79 are recorded separately in docs/validation.md.",
+    "offline": "605/605 Windows local and Ubuntu CI full checks, including 11 real-process/RPC updater regressions, 8 localized update-error UI regressions and 10 active-key settings refresh regressions through built client, registered RPC and real LlmRuntime; registered adapter, ToolRuntime, Cordis/HostConnection and client packages for 0.2.0-rc.2/0.2.1-rc.2. Native Windows/Linux/macOS updater checks each passed 11/11 on the final 0.1.6 source commit 2a4aa6cad33ef828cf57f519deb6d7320c8a05ad in CI run 39359733708. Published 0.1.5 was checked at 586/586. Historical unpacked transport boundaries 6/6 and original development regressions 79/79 are recorded separately in docs/validation.md.",
     "liveGateway": "Partial: model lists and usage succeeded. Real DSH chat received normal replies from deepseek-v4.1-flash and deepseek-v4-pro; deepseek-v4-flash returned 404/model_not_found, deepseek-v4-flash-0731 retried 503, and deepseek-flash was stopped without a final answer. No claim that every listed model is callable.",
     "runningDsh": "Development-time local DSH chat and tools verified for deepseek-v4.1-flash/deepseek-v4-pro. No claim that 0.1.6 is installed or loaded in the user's DSH.",
     "googleTransport": "Locally bundled pi-ai 1.1.0 native Google API and patched @google/genai 2.21.0 reject redirects and preserve framed SSE error status/reasons. Version/hash/patch and bundle checks fail closed. No host SDK patch or global fetch patch is required; both Gemini models have built-adapter local-server regressions and DSH 0.2.0-rc.2 adapter/tool loops.",
     "report": "docs/validation.md",
-    "distribution": "0.1.5 is public on official npm/latest and GitHub v0.1.5 at commit 1769e289a1f71b811ce7b30294d9498a3597d4b5. Public npm tarball, GitHub asset and prepare/publish CI artifacts are byte-identical: 53 files, 463983 bytes, SHA256 af683b2b655d587e46b0fb404abc2ab87e5c5d4da3a8bf5cd38a45231c119055. OIDC provenance source, package digest, tag, release notes and npm README verified. Release-existing completed after transient npm metadata 404; npm was not republished. No real npm DSH installation or cross-version update performed."
+    "distribution": "0.1.6 is public on official npm/latest and GitHub v0.1.6 at commit 2a4aa6cad33ef828cf57f519deb6d7320c8a05ad. Default public npm tarball, GitHub asset and prepare/publish CI artifacts are byte-identical: 54 files, 469238 bytes, SHA256 d43d1b4aa9c9204be8b48cd9652a80234dd96ba3a7c4302d7360588c4e61d956. OIDC provenance fields, package digest, tag, release notes and npm README verified at 2026-10-20T02:44:18Z. Publish run 39359871725 succeeded in npm; release-existing run 39360181649 completed after transient npm metadata 404. A cached tarball 404 was allowed to expire before declaring the download ready; npm was not republished. No real npm DSH installation or cross-version update performed."
   }
 }

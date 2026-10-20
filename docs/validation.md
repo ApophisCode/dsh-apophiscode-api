@@ -48,12 +48,40 @@ pnpm run check
 修复后为 11/11 通过，成功用例核对落盘 0.1.5、运行快照 0.1.4 与待重启状态。
 fixture 的版本号只是离线输入，不代表更新已经安装到用户 DSH。
 
-当前修复为 **0.1.6**，本节为发布前验证；公开状态以发布后核对记录为准。
+当前修复为 **0.1.6**，本节为发布前验证；公开状态见下节发布后核对记录。
 未安装到用户 DSH，也未操作其启动、停止或重启。真实跨版本在线安装及 Linux/macOS
 完整 DSH 交互仍待验收。旧版的更新器不会因远端发布新包而自动替换自身；首次获取本修复
 需要由使用者通过宿主插件管理器安装 `dsh-apophiscode-api@0.1.6`，之后再验证插件内按钮路径。
 README 中既定的检查更新、点击更新、重新打开 DSH 的流程保持适用，无需新增终端步骤；
 本次已同步变更记录、安装文档与本节证据。
+
+## 0.1.6 公开发行验证
+
+- 2026-10-20 发布后，[npm 精确版本](https://www.npmjs.com/package/dsh-apophiscode-api/v/0.1.6)、
+  registry 的精确版本、`latest` 与完整元数据均核对为 **0.1.6**；默认公开 tarball
+  下载成功。[GitHub v0.1.6 Release](https://github.com/ApophisCode/dsh-apophiscode-api/releases/tag/v0.1.6)
+  是最新正式发行，tag 指向固定源码提交 `2a4aa6cad33ef828cf57f519deb6d7320c8a05ad`。
+- 最终提交的[普通 CI](https://github.com/ApophisCode/dsh-apophiscode-api/actions/runs/39359733708)
+  三系统更新进程各 **11/11**、Ubuntu 全量 **605/605**，bundle 再生一致。
+  [准备任务](https://github.com/ApophisCode/dsh-apophiscode-api/actions/runs/39359756549)
+  通过完整检查与 preflight；下载后的 54 个包内文件逐一对比固定提交的 git blob，
+  仅 `package.json` 有 pnpm 正常省略 `packageManager` 的差异。
+- [正式发布任务](https://github.com/ApophisCode/dsh-apophiscode-api/actions/runs/39359871725)
+  的 prepare/publish 成功，经 GitHub Actions OIDC 上传同一 tgz。npm 公开元数据
+  暂时 404，导致 Release 核对停止；精确版本和 integrity 可读后，保持源码提交不变，
+  使用 [release-existing](https://github.com/ApophisCode/dsh-apophiscode-api/actions/runs/39360181649)
+  成功补齐 tag/Release，publish job 正确跳过，没有重复 npm 发布。
+- npm 下载入口还曾命中发布前的 300 秒负缓存。2026-10-20T02:44:18Z 最终核对时，
+  默认下载已成功，npm、GitHub 附件及两次 CI artifact 的 tgz 逐字节一致：
+  **54 文件、469238 字节**，SHA-256 为
+  `d43d1b4aa9c9204be8b48cd9652a80234dd96ba3a7c4302d7360588c4e61d956`。
+  Release 标题、说明、`SHA256SUMS` 和 npm 首页 README 与固定发行物相符。
+- npm 公开 publish/provenance statements 中的包 SHA-512、仓库 ID `1425822020`、
+  `.github/workflows/publish.yml`、main 来源提交和正式发布 run 均核对一致。
+
+本节为发布后补录，未重新打包或覆盖公开的 0.1.6。
+本次没有安装到用户 DSH，也未启动、停止或重启其宿主，未读取用户 Key 或调用模型。
+公开分发与原生进程测试不代表真实 DSH 跨版本在线升级已经现场验收。
 
 ## 0.1.5 修复：切换 Key 后设置页模型列表未刷新
 
@@ -92,8 +120,8 @@ pnpm run check
 ## 0.1.5 公开发行验证
 
 - [npm 精确版本](https://www.npmjs.com/package/dsh-apophiscode-api/v/0.1.5)已公开，
-  `latest` 指向 `0.1.5`；[GitHub v0.1.5 Release](https://github.com/ApophisCode/dsh-apophiscode-api/releases/tag/v0.1.5)
-  已作为最新正式发行公开。中英文安装示例已更新，npm 首页 README 与发行提交一致。
+  该次核对时 `latest` 指向 `0.1.5`；[GitHub v0.1.5 Release](https://github.com/ApophisCode/dsh-apophiscode-api/releases/tag/v0.1.5)
+  作为当时最新正式发行公开。中英文安装示例已更新，npm 首页 README 与发行提交一致。
 - 固定发行提交为 `1769e289a1f71b811ce7b30294d9498a3597d4b5`。
   [准备任务](https://github.com/ApophisCode/dsh-apophiscode-api/actions/runs/39355650839)
   完成 586/586 检查、构建一致性与 preflight；下载审查的全部包内文件与发行提交匹配，
