@@ -24,7 +24,7 @@
   pnpm run check
   ```
 
-  最终产物为 `.artifacts/dsh-apophiscode-api-0.1.5.tgz`。`check` 包含全量测试、
+  最终产物为 `.artifacts/dsh-apophiscode-api-0.1.6.tgz`。`check` 包含全量测试、
   两个 bundle 的再生与打包；单独 pack 成功不能代替检查通过。
 - tarball 含运行 bundle、图标、许可和本地文档；不含源码、测试、开发脚本或
   开发依赖。继续修改或运行验收脚本需要保留完整源码工作区。
@@ -32,8 +32,8 @@
 ## npm 精确版本安装
 
 在 DSH **设置 → 插件 → 添加插件** 的“包名或地址”中填写
-`dsh-apophiscode-api@0.1.5`。使用 CLI 时可执行
-`dsh plugin --profile <实际 profile> add dsh-apophiscode-api@0.1.5`；
+`dsh-apophiscode-api@0.1.6`。使用 CLI 时可执行
+`dsh plugin --profile <实际 profile> add dsh-apophiscode-api@0.1.6`；
 先确认所用 CLI 属于当前宿主版本。安装后按下文核对 profile、启用状态与实际运行版本。
 
 GitHub Release 中的同版本 tgz 可按本地文件安装；它仍属于本地来源，不会变成 npm 来源。
@@ -45,8 +45,8 @@ GitHub Release 中的同版本 tgz 可按本地文件安装；它仍属于本地
    `package.json`、`pnpm-lock.yaml` 与实际使用的 `cordis.patch.yml` 等配置文件。
    备份限于安装会影响的清单与配置，不导出凭据记录或会话。
 2. 在现有 DSH 中打开 **设置 → 插件 → 添加插件**，在 **包名或地址** 中填写
-   `dsh-apophiscode-api@0.1.5` 并安装。使用 Release 文件或源码构建包时，改填对应
-   tarball 的本机绝对路径，例如 `C:\Downloads\dsh-apophiscode-api-0.1.5.tgz`。
+   `dsh-apophiscode-api@0.1.6` 并安装。使用 Release 文件或源码构建包时，改填对应
+   tarball 的本机绝对路径，例如 `C:\Downloads\dsh-apophiscode-api-0.1.6.tgz`。
 3. 确认插件已启用，在 **设置 → ApophisCode → 插件版本** 核对运行版本。
    若仍显示旧版本、提示待重启或看不到设置入口，退出并重新打开当前同版本、同 profile 的
    DSH，再次核对。不要把启用状态、磁盘 hash 或浏览器刷新当成新模块已生效。
@@ -92,6 +92,10 @@ SDK 和局部补丁以阻断重定向、保留 SSE 错误原因，验证范围�
 npm 来源可在 **设置 → ApophisCode → 插件版本** 检查并更新至官方 npm 的 latest。
 尚无 latest 时明确提示尚未公开；网络失败明确报错。更新前重新获取版本，只安装比运行版和落盘版都新的精确版本，遵守 profile 的发布冷却期，不覆盖本地文件或开发链接。
 安装成功只代表落盘核对通过；重启同版本、同 profile 的 DSH 后再核对运行版本。
+更新器负责处理不同操作系统的安装程序启动方式，正常更新不要求使用者配置路径或执行命令。
+0.1.6 为更新失败增加具体原因和按钮重试；公开状态与各系统验证范围见
+[验证记录](validation.md)。已运行的旧更新器不能通过远端发布自动修好自身；首次取得修复
+需在宿主 **设置 → 插件** 安装 `dsh-apophiscode-api@0.1.6`，再核对插件内更新路径。
 本地源码修改后重新执行完整检查，保留旧 tgz，再显式安装新的本地产物。
 本机同版本重新安装也需要重启宿主，之后重新核对模型目录。
 

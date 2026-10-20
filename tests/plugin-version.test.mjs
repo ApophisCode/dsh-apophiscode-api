@@ -218,10 +218,10 @@ test('update installs the exact version into the owning profile, pinned and unde
   })
   const updated = await manager.update()
   assert.deepEqual(updated, { version: '1.0.4', profile: 'web' })
-  assert.equal(calls[0].command, 'pnpm')
+  assert.equal(typeof calls[0].command, 'string')
   // No minimumReleaseAge override: a version installed past the policy would
   // make pnpm refuse every later plugin install in the profile.
-  assert.deepEqual(calls[0].args, ['add', '--save-exact', '--registry=https://registry.npmjs.org/', `${PACKAGE_NAME}@1.0.4`])
+  assert.deepEqual(calls[0].args.slice(-4), ['add', '--save-exact', '--registry=https://registry.npmjs.org/', `${PACKAGE_NAME}@1.0.4`])
   assert.equal(calls[0].cwd, join(root, 'profiles', 'web'))
   await manager.read()
   assert.equal(registryRequests, 2, 'a successful update invalidates the cached version')

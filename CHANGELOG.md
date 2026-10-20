@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.1.6 — 2026-10-20
+
+- Fix plugin updates on Windows CLI hosts by locating npm/Corepack pnpm
+  launchers and starting their program directly with the host Node. Preserve
+  desktop-bundled pnpm, support native executables and POSIX script symlinks,
+  and keep exact-version installs and the profile's release-age policy.
+- Show localized update failure reasons and retain the retry button; installer
+  output and host paths stay private. Explain when reopening DSH is required.
+- Add real-process/RPC update regressions and native Windows, Linux and macOS
+  CI jobs. Current local evidence and remaining checks are in `docs/validation.md`.
+
 ## 0.1.5 — 2026-10-20
 
 - Refresh the open model visibility card after conversation-key changes, host

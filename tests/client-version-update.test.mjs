@@ -15,7 +15,7 @@ const fill = (template, values) => template.replace(/\{(\w+)\}/gu, (_match, name
 const AVAILABLE_AT = Date.parse('2026-10-18T19:16:25.489Z')
 
 /** The built settings page against a channel whose update answers with `updateResult`. */
-async function versionFixture(t, updateResult, { local = false, unpublished = false, versionError = false, installed } = {}) {
+async function versionFixture(t, updateResult, { local = false, unpublished = false, versionError = false, installed, updateError } = {}) {
   const answers = {
     status: () => ({ activeId: null, writable: true, hosts: {}, defaults: {}, keys: [] }),
     balance: () => ({ fetchedAt: 1, keys: [] }),
@@ -27,6 +27,7 @@ async function versionFixture(t, updateResult, { local = false, unpublished = fa
       return { current: '1.3.2', latest: '1.3.3', updateAvailable: !installed, ...(installed ? { installed, restartRequired: true } : {}), install: { kind: 'npm', profile: 'desktop' }, fetchedAt: 1 }
     },
     'plugin/update': () => {
+      if (updateError) throw new Error(updateError)
       if (updateResult?.pending !== true) installed = updateResult?.version
       return updateResult
     },
@@ -128,3 +129,25 @@ test('a failed version check shows an error without claiming to be latest', asyn
   assert.equal(text(page.card()).includes(zh.versionUpToDate), false)
   assert.equal(page.card().findByType('a').props.href, 'https://github.com/ApophisCode/dsh-apophiscode-api/releases')
 })
+
+for (const [message, copy] of [
+  ['ApophisCode plugin update could not start the installer', 'versionUpdateInstallerFailed'],
+  ['ApophisCode plugin update could not reach the package registry', 'versionUpdateNetworkFailed'],
+  ['ApophisCode plugin update could not write to the plugin directory', 'versionUpdatePermissionFailed'],
+  ['ApophisCode plugin update ran out of disk space', 'versionUpdateDiskFull'],
+  ['ApophisCode plugin update timed out', 'versionUpdateTimedOut'],
+  ['ApophisCode plugin update did not install the requested version', 'versionUpdateNotInstalled'],
+  ['ApophisCode plugin version check failed', 'versionUpdateCheckFailed'],
+  ['unknown fixture-private-text', 'versionUpdateFailed'],
+]) {
+  test(`the update page displays ${copy} and keeps the update button`, async t => {
+    const page = await versionFixture(t, undefined, { updateError: message })
+    await page.update()
+    assert.ok(zh[copy], 'the reason has localized copy')
+    assert.ok(text(page.card()).includes(zh[copy]))
+    assert.equal(text(page.card()).includes('fixture-private-text'), false)
+    assert.equal(text(page.card()).includes(zh.versionUpdatedHint), false)
+    assert.equal(page.updateButton().length, 1)
+    assert.equal(page.updateButton()[0].props.disabled, false)
+  })
+}

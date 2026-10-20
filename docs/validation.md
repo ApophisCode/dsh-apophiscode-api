@@ -3,6 +3,54 @@
 日期：2026-10-20。离线 fixture、真实网关调用和运行中 DSH 交互分别记录。
 本页描述当前实现的证据与限制；本地开发过程和逐次检查日志保存在忽略目录。
 
+## 0.1.6 修复：点击更新后安装器启动失败
+
+2026-10-20 新增排障，与下方已公开 0.1.5 的历史证据分开记录。
+
+- 用户反馈：0.1.4 能检查出 0.1.5，点击更新后等待数秒报通用失败。只读检查
+  `web` profile 的落盘版仍为 0.1.4；运行宿主为 Node 直接启动 DSH `bin.js`，
+  参数没有桌面版的 bundled pnpm。未读取用户凭据或调用更新端点。
+- 修复前，在独立临时 profile 经真实 RPC、默认进程启动器复现两次：
+  能发现新版本，更新却返回 `ApophisCode plugin update failed`，落盘不变。
+  裸 `spawn('pnpm', ['--version'])` 在本机返回 `ENOENT`。旧检查使用命令 stub，
+  没有覆盖 Windows 进程启动；[Node 官方文档](https://nodejs.org/api/child_process.html#spawning-bat-and-cmd-files-on-windows)
+  说明 `.cmd` 不能作为普通可执行文件直接启动。
+- pnpm 定位与启动职责移至 `src/plugin-pnpm.js`。优先保留宿主自带 pnpm，
+  再寻找系统安装；Windows 的 npm/Corepack shim 解析到实际 JS/EXE，JS 用宿主
+  Node 直接运行。POSIX 支持可执行程序、脚本及其符号链接，短 PATH 也补齐宿主
+  Node 目录。全程不拼接 shell 命令，不更改 profile 的发布冷却期。
+- 修复后的同一反馈循环通过；另用同一解析器只读启动本机实际 pnpm，
+  `--version` 成功返回 `10.32.1`。该检查不安装插件。
+- 新增默认子进程 → pnpm fixture → RPC 的 **11/11** 检查：PATH、宿主自带与
+  runtime pnpm、PNPM_HOME、Corepack、含空格和 `&` 的路径、冷却期、网络失败、
+  超时、零退出却没有安装、同实例重试恢复，以及 Windows 损坏 shim。
+  POSIX 原生 CI 使用等价的脚本符号链接检查代替 Windows 专项。
+- 新增 **8/8** 构建后设置页检查，显示固定中英文失败原因并保留可用重试按钮；
+  未知错误、原始输出与路径不会进入提示。落盘成功和待重新加载仍分开显示。
+- 本机 Windows、Node `24.13.0`、pnpm `10.32.1` 的完整检查 **605/605** 通过，
+  零失败、零跳过，完成两端构建与本地打包。自动检查已增加 Windows、Linux、macOS
+  原生 job；当前尚未推送/运行这些 job。本机 WSL 的 Ubuntu 虚拟磁盘缺失，
+  未取得额外 Linux 结果，也没有为此修改 WSL 或 Docker。
+
+复现与回归命令：
+
+```powershell
+node --test tests/plugin-update-process.test.mjs
+node --test tests/plugin-version.test.mjs tests/client-version-update.test.mjs
+pnpm run check
+```
+
+修复前第一条命令失败，实际为 `{ ok: false, error: { message: 'ApophisCode plugin update failed', ... } }`；
+修复后为 11/11 通过，成功用例核对落盘 0.1.5、运行快照 0.1.4 与待重启状态。
+fixture 的版本号只是离线输入，不代表更新已经安装到用户 DSH。
+
+当前修复准备为 **0.1.6**，本节为发布前验证；公开状态以发布后核对记录为准。
+未安装到用户 DSH，也未操作其启动、停止或重启。真实跨版本在线安装及 Linux/macOS
+原生结果仍待验收。旧版的更新器不会因远端发布新包而自动替换自身；首次获取本修复
+需要由使用者通过宿主插件管理器安装 `dsh-apophiscode-api@0.1.6`，之后再验证插件内按钮路径。
+README 中既定的检查更新、点击更新、重新打开 DSH 的流程保持适用，无需新增终端步骤；
+本次已同步变更记录、安装文档与本节证据。
+
 ## 0.1.5 修复：切换 Key 后设置页模型列表未刷新
 
 2026-10-20 新增回归，独立于下方 0.1.4 发行时的历史验证。

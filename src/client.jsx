@@ -11,6 +11,7 @@
 import * as react from 'react'
 
 import { en, zh } from './client-copy.js'
+import { updateFailureCopy } from './plugin-update-errors.js'
 import { STYLE } from './client-style.js'
 import { installImagePresentation, ApophisCodeImagesCard, ApophisCodeImageShortcut } from './client-images.jsx'
 import { fill, KeyBalance, QuotaHover } from './client-balance.jsx'
@@ -713,7 +714,7 @@ function VersionCard({ call, t }) {
   const [loading, setLoading] = react.useState(true)
   const [error, setError] = react.useState(false)
   const [updating, setUpdating] = react.useState(false)
-  const [updateFailed, setUpdateFailed] = react.useState(false)
+  const [updateFailed, setUpdateFailed] = react.useState()
   /** A version pnpm still holds back under the profile's release-age policy. */
   const [pending, setPending] = react.useState()
   const [updated, setUpdated] = react.useState()
@@ -740,7 +741,7 @@ function VersionCard({ call, t }) {
 
   const update = () => {
     setUpdating(true)
-    setUpdateFailed(false)
+    setUpdateFailed(undefined)
     setPending(undefined)
     call('plugin/update').then(value => {
       if (value?.pending === true) {
@@ -749,7 +750,7 @@ function VersionCard({ call, t }) {
       }
       setUpdated(value)
       setRestartHint(false)
-    }).catch(() => setUpdateFailed(true)).finally(() => setUpdating(false))
+    }).catch(error => setUpdateFailed(updateFailureCopy(error))).finally(() => setUpdating(false))
   }
 
   const installKind = info?.install?.kind
@@ -780,7 +781,7 @@ function VersionCard({ call, t }) {
       )}
       {showStatus && installKind === 'link' && <p className="apc-note">{t('versionLinked')}</p>}
       {showStatus && info.updateAvailable && installKind === 'unknown' && <p className="apc-note">{t('versionManual')}</p>}
-      {updateFailed && <p className="apc-error" role="alert">{t('versionUpdateFailed')}</p>}
+      {updateFailed && <p className="apc-error" role="alert">{t(updateFailed)}</p>}
       {pending !== undefined && <p className="apc-note" role="status">{typeof pending.availableAt === 'number'
         ? fill(t('versionCoolingUntil'), { version: pending.version, time: readDateTime(pending.availableAt) })
         : fill(t('versionCooling'), { version: pending.version })}</p>}

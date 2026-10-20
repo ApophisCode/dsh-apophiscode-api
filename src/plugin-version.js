@@ -15,7 +15,6 @@
  */
 
 import { spawn } from 'node:child_process'
-import { existsSync } from 'node:fs'
 import { readdir, readFile, realpath } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
@@ -23,8 +22,12 @@ import { fileURLToPath } from 'node:url'
 
 import { createCachedRead } from './cached-read.js'
 import { ambientFetch, boundedFetch } from './request.js'
+import { resolvePnpmLauncher } from './plugin-pnpm.js'
+import { withProgramDirOnPath } from './locate.js'
+import { installerFailure, UPDATE_ERRORS } from './plugin-update-errors.js'
 
 export { ambientFetch, waitForSharedRequest } from './request.js'
+export { resolvePnpm } from './plugin-pnpm.js'
 
 export const PACKAGE_NAME = 'dsh-apophiscode-api'
 export const NPM_REGISTRY_LATEST_URL = `https://registry.npmjs.org/${PACKAGE_NAME}/latest`
@@ -110,7 +113,7 @@ async function confirmInstalled({ profileDir, expected, settleDelayMs, attempts 
     if (installed === expected) return
     if (attempt < attempts) await new Promise(resolve => { setTimeout(resolve, settleDelayMs) })
   }
-  throw new Error('ApophisCode plugin update did not install the requested version')
+  throw new Error(UPDATE_ERRORS.versionUpdateNotInstalled)
 }
 
 /**
@@ -150,45 +153,8 @@ export async function findInstall({ dshHome, ownPackageJsonUrl }) {
   return { kind: 'unknown' }
 }
 
-const isExistingPath = value => typeof value === 'string' && value !== '' && existsSync(value)
-
-/** Anchored to the file name so a directory that merely contains the word cannot match. */
-const PNPM_SCRIPT = /[\\/]pnpm\.(?:mjs|cjs|js)$/u
-
-const dshRuntimeRoot = value => (isExistingPath(value)
-  && existsSync(join(value, 'node_modules', '@deepseek-ai', 'dsh', 'package.json'))
-  ? value
-  : undefined)
-
-/**
- * Locate the package manager that owns this profile.
- *
- * `dsh plugin --profile desktop` is refused by the desktop app, so the update
- * installs with pnpm directly. The desktop host puts the bundled pnpm in its
- * own arguments; nothing is guessed from the entry script.
- */
-export function resolvePnpm({ argv } = {}) {
-  const entries = Array.isArray(argv) ? argv : []
-  for (const entry of entries) {
-    if (isExistingPath(entry) && PNPM_SCRIPT.test(entry)) return entry
-  }
-  for (const entry of entries) {
-    const root = dshRuntimeRoot(entry)
-    if (root === undefined) continue
-    const script = join(root, '..', 'pnpm', 'bin', 'pnpm.mjs')
-    if (existsSync(script)) return script
-  }
-  return undefined
-}
-
-function resolveLauncher({ argv, execPath }) {
-  const pnpm = resolvePnpm({ argv })
-  if (pnpm === undefined) return { command: 'pnpm', prefix: [] }
-  return { command: execPath, prefix: [pnpm] }
-}
-
 /** Run pnpm host-side. Its output is never returned to the browser. */
-function spawnRunCommand({ command, args, cwd }, { signal, timeoutMs }) {
+function spawnRunCommand({ command, args, cwd }, { signal, timeoutMs, env }) {
   return new Promise((resolve, reject) => {
     if (signal?.aborted) {
       reject(signal.reason instanceof Error ? signal.reason : new Error('ApophisCode plugin update aborted'))
@@ -197,7 +163,7 @@ function spawnRunCommand({ command, args, cwd }, { signal, timeoutMs }) {
     const controller = new AbortController()
     const onAbort = () => controller.abort(signal.reason)
     signal?.addEventListener('abort', onAbort, { once: true })
-    const timer = setTimeout(() => controller.abort(new Error('ApophisCode plugin update timed out')), timeoutMs)
+    const timer = setTimeout(() => controller.abort(new Error(UPDATE_ERRORS.versionUpdateTimedOut)), timeoutMs)
     let settled = false
     const settle = (callback, value) => {
       if (settled) return
@@ -210,6 +176,8 @@ function spawnRunCommand({ command, args, cwd }, { signal, timeoutMs }) {
     try {
       child = spawn(command, args, {
         stdio: ['ignore', 'pipe', 'pipe'],
+        windowsHide: true,
+        env,
         signal: controller.signal,
         ...(cwd === undefined ? {} : { cwd }),
       })
@@ -221,7 +189,7 @@ function spawnRunCommand({ command, args, cwd }, { signal, timeoutMs }) {
     let stderr = ''
     child.stdout?.on('data', chunk => { stdout = (stdout + chunk).slice(-8192) })
     child.stderr?.on('data', chunk => { stderr = (stderr + chunk).slice(-8192) })
-    child.on('error', error => settle(reject, error))
+    child.on('error', error => settle(reject, controller.signal.aborted ? controller.signal.reason : error))
     child.on('close', code => {
       if (controller.signal.aborted) {
         const reason = controller.signal.reason
@@ -243,6 +211,7 @@ export function createApophisCodePluginManager({
   execPath = process.execPath,
   argv = process.argv,
   env = process.env,
+  platform = process.platform,
   ownPackageJsonUrl = new URL('../package.json', import.meta.url),
   registryUrl = NPM_REGISTRY_LATEST_URL,
   now = Date.now,
@@ -254,7 +223,6 @@ export function createApophisCodePluginManager({
   if (typeof fetchImpl !== 'function') throw new Error('ApophisCode plugin manager requires fetch')
   if (typeof runCommand !== 'function') throw new Error('ApophisCode plugin manager requires runCommand')
   const dshHome = typeof env.DSH_HOME === 'string' && env.DSH_HOME !== '' ? env.DSH_HOME : join(homedir(), '.dsh')
-  const launcher = resolveLauncher({ argv, execPath })
   // Snapshot at manager creation: an on-disk replacement does not reload code.
   const ownManifest = readManifest(fileURLToPath(ownPackageJsonUrl))
   let updating = false
@@ -335,20 +303,25 @@ export function createApophisCodePluginManager({
         }
         let result
         try {
+          const launcher = resolvePnpmLauncher({ argv, execPath, env, platform })
           result = await runCommand({
             command: launcher.command,
             args: [...launcher.prefix, 'add', '--save-exact', '--registry=https://registry.npmjs.org/', `${PACKAGE_NAME}@${latest}`],
             cwd: profileDir,
-          }, { signal, timeoutMs: updateTimeoutMs })
+          }, { signal, timeoutMs: updateTimeoutMs, env: withProgramDirOnPath(env, execPath, platform) })
         } catch (error) {
           if (signal?.aborted) throw error
-          throw new Error('ApophisCode plugin update failed')
+          if ([UPDATE_ERRORS.versionUpdateInstallerFailed, UPDATE_ERRORS.versionUpdateTimedOut].includes(error?.message)) {
+            throw new Error(error.message)
+          }
+          if (['ENOENT', 'EINVAL', 'ENOEXEC'].includes(error?.code)) throw new Error(UPDATE_ERRORS.versionUpdateInstallerFailed)
+          throw new Error(installerFailure({ code: error?.code }))
         }
         if (result.code !== 0) {
           // Not a failure to retry blindly: pnpm installs it once old enough.
           const refusal = releaseAgeRefusal(`${result.stdout ?? ''}\n${result.stderr ?? ''}`, now())
           if (refusal !== undefined) return { version: latest, profile: install.profile, pending: true, ...refusal }
-          throw new Error('ApophisCode plugin update failed')
+          throw new Error(installerFailure(result))
         }
         await confirmInstalled({ profileDir, expected: latest, settleDelayMs })
         cache.invalidate()
