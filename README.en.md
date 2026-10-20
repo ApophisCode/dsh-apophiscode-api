@@ -96,6 +96,9 @@ Image tools require a separate image key and image model; their verification sco
 
 ## Updating the plugin
 
+To upgrade from 0.1.4 or 0.1.5, first use DSH's **Settings → Plugins → Add Plugin**
+and install `dsh-apophiscode-api@0.1.6`. The updater inside those older versions may fail to start the installer.
+
 For an npm installation:
 
 1. Open **Settings → ApophisCode → Plugin version** and click **Check for updates**.
