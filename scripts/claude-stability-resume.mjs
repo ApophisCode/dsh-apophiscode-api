@@ -26,7 +26,7 @@ export async function resumeStability({ statePath, buildPath = 'lib/index.js', n
       throw new Error('Only the recorded test-message policy misclassification can be resumed here')
     }
     const key = await loadKey({ label: state.keyLabel })
-    if (`…${key.slice(-4)}` !== state.maskedTail) throw new Error('The stored key no longer matches the observation window')
+    if (state.credentialFingerprint !== undefined ? createHash('sha256').update(key).digest('hex') !== state.credentialFingerprint : `…${key.slice(-4)}` !== state.maskedTail) throw new Error('The stored key no longer matches the observation window')
     if (summarizeStability(state).requests >= state.maxRequests) throw new Error('The original request budget is exhausted')
     const current = await readFile(resolve(buildPath))
     const sha256 = createHash('sha256').update(current).digest('hex')

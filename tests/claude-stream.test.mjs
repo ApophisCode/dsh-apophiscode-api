@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { createApophisCodeProvider } from '../src/provider.js'
+import { createApophisCodeProvider } from './fixtures/declared-gateway.mjs'
 import { hostProvider } from './helpers.mjs'
 import { anthropicStream } from './fixtures/anthropic.mjs'
 

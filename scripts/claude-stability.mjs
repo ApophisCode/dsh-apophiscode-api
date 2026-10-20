@@ -4,7 +4,8 @@ import { createHash, randomUUID } from 'node:crypto'
 import { mkdir, open, readFile, rename, unlink, writeFile } from 'node:fs/promises'
 import { dirname, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { CLAUDE_MODELS, createClaudeCheck } from './claude-check.mjs'
+import { createClaudeCheck } from './claude-check.mjs'
+import { exactModel } from './gateway-directory.mjs'
 import { readStoredKey } from './stored-key.mjs'
 import { redactSecrets } from '../src/secret-redactor.js'
 import { TEST_MESSAGE_POLICY_CODE } from '../src/failures.js'
@@ -47,7 +48,7 @@ export function summarizeStability(state) {
     requests: requests.length,
     statuses: Object.fromEntries([...new Set(requests.map(request => String(request.status ?? 'transport')))].map(status => [status, requests.filter(request => String(request.status ?? 'transport') === status).length])),
     checkLatencyMs: { median: durations[Math.floor(durations.length / 2)], p95: durations[Math.max(0, Math.ceil(durations.length * .95) - 1)] },
-    models: Object.fromEntries(CLAUDE_MODELS.map(model => {
+    models: Object.fromEntries([...new Set(state.models ?? checks.map(check => check.model))].map(model => {
       const rows = checks.filter(check => check.model === model)
       return [model, { passed: rows.filter(check => check.ok).length, failed: rows.filter(check => !check.ok).length, kinds: [...new Set(rows.map(check => check.kind))] }]
     })),
@@ -55,7 +56,7 @@ export function summarizeStability(state) {
 }
 
 /** No keys are persisted, no model traffic after the deadline, no overlapping rounds. */
-export async function sampleStability({ statePath, start = false, hours = 6, keyLabel, now = Date.now, buildHash = hashBuild, loadKey = readStoredKey, makeCheck = createClaudeCheck } = {}) {
+export async function sampleStability({ statePath, start = false, hours = 6, keyLabel, models, now = Date.now, buildHash = hashBuild, loadKey = readStoredKey, makeCheck = createClaudeCheck } = {}) {
   if (!statePath) throw new Error('A stability state path is required')
   if (!Number.isFinite(hours) || hours <= 0 || hours > 12) throw new Error('Stability duration must be greater than zero and at most 12 hours')
   const path = resolve(statePath)
@@ -94,9 +95,11 @@ export async function sampleStability({ statePath, start = false, hours = 6, key
       if (error.code !== 'ENOENT') throw new Error('Stability state could not be read safely')
       if (!start) throw new Error('Initialize this stability window with --start first')
       if (typeof keyLabel !== 'string' || keyLabel === '') throw new Error('Starting requires a stored key label')
+      if (!Array.isArray(models) || models.length === 0) throw new Error('Starting requires explicit exact model IDs')
+      models.forEach(exactModel)
       const started = now()
       state = { format: FORMAT, status: 'active', startedAt: iso(started), endsAt: iso(started + hours * 3_600_000), intervalMs: INTERVAL_MS,
-        keyLabel, buildSha256: await buildHash(), scenarioVersion: CLAUDE_SCENARIO_VERSION, sessionId: randomUUID(), maxRequests: Math.ceil(hours * 4) * 5,
+        keyLabel, models: [...new Set(models)], buildSha256: await buildHash(), scenarioVersion: CLAUDE_SCENARIO_VERSION, sessionId: randomUUID(), maxRequests: Math.ceil(hours * 4) * (models.length + 2),
         lastSlot: -1, missedSlots: 0, rounds: [] }
     }
     if (state.format !== FORMAT || !Array.isArray(state.rounds) || !Number.isFinite(Date.parse(state.endsAt))) throw new Error('Unsupported stability state')
@@ -123,10 +126,10 @@ export async function sampleStability({ statePath, start = false, hours = 6, key
     }
     const slot = Math.floor((now() - Date.parse(state.startedAt)) / state.intervalMs)
     if (slot <= state.lastSlot) return { ...summarizeStability(state), due: false }
-    const extra = { model: CLAUDE_MODELS[Math.floor(slot / 3) % 3], kind: ['tool', 'image', 'title'][slot % 3] }
-    // Haiku and Sonnet tool turns can each replay one client anomaly. Reserve
-    // their worst-case seven requests without raising the window's budget.
-    const roundBudget = ['claude-haiku-5-5', 'claude-sonnet-5-5'].includes(extra.model) && extra.kind === 'tool' ? 7 : 5
+    const activeModels = state.models ?? [...new Set(state.rounds.flatMap(round => round.checks.map(check => check.model)))]
+    if (activeModels.length === 0) throw new Error('State has no model IDs; start a new explicit sampling window')
+    const extra = { model: activeModels[Math.floor(slot / 3) % activeModels.length], kind: ['tool', 'image', 'title'][slot % 3] }
+    const roundBudget = activeModels.length + 2
     if (summarizeStability(state).requests + roundBudget > state.maxRequests) {
       state.status = 'stopped'
       state.stopReason = 'request-budget-reached'
@@ -139,20 +142,20 @@ export async function sampleStability({ statePath, start = false, hours = 6, key
       await save()
       return state.summary
     }
-    const tail = `…${key.slice(-4)}`
-    if (state.maskedTail !== undefined && state.maskedTail !== tail) {
+    const tail = createHash('sha256').update(key).digest('hex')
+    if (state.credentialFingerprint !== undefined && state.credentialFingerprint !== tail) {
       state.status = 'stopped'
       state.stopReason = 'stored-key-changed'
       await save()
       return state.summary
     }
-    state.maskedTail = tail
+    state.credentialFingerprint = tail
     state.missedSlots += Math.max(0, slot - state.lastSlot - 1)
     state.lastSlot = slot
     const round = { slot, startedAt: iso(now()), buildSha256: state.buildSha256, scenarioVersion: CLAUDE_SCENARIO_VERSION, checks: [] }
     const check = await makeCheck({ key, sessionId: state.sessionId, builtPath })
     try {
-      const cases = [...CLAUDE_MODELS.map((model, index) => ({ model, kind: 'text', variant: slot + index })), { ...extra, variant: slot }]
+      const cases = [...activeModels.map((model, index) => ({ model, kind: 'text', variant: slot + index })), { ...extra, variant: slot }]
       for (const current of cases) {
         if (now() >= Date.parse(state.endsAt)) break
         // Abort the current request at the window boundary as well.
@@ -194,7 +197,7 @@ async function main() {
     console.log(JSON.stringify({ ...summarizeStability(state), stopReason: state.stopReason, nextDueAt: state.nextDueAt }, null, 2))
     return
   }
-  const result = await sampleStability({ statePath, start: args.includes('--start'), hours: Number(option('--hours', 6)), keyLabel: option('--key-label', undefined) })
+  const result = await sampleStability({ statePath, start: args.includes('--start'), hours: Number(option('--hours', 6)), keyLabel: option('--key-label', undefined), models: option('--models', undefined)?.split(',') })
   console.log(JSON.stringify(result, null, 2))
 }
 

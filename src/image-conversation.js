@@ -21,8 +21,7 @@ function successfulImages(event) {
     return [{ type: 'tool-result', toolCallId: event.data.subCallId, content: event.data.content, meta: { kind: 'apophiscode-image' } }]
   }
   const source = event?.data?.message?.source
-  if (event?.type !== 'assistant/message' || source?.kind !== 'model' || source.provider !== 'apophiscode'
-    || !/^claude-/u.test(source.model ?? '')) return []
+  if (event?.type !== 'assistant/message' || source?.kind !== 'model' || source.provider !== 'apophiscode') return []
   // Older CLI-backed sessions saved assistant image blocks. Keep their view
   // projection and stable IDs readable, never create a logged fake
   // tool invocation. Replay/ownership uses the durable assistant reference.

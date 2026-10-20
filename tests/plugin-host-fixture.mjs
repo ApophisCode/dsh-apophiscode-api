@@ -5,7 +5,7 @@ import { BlockAssembler, createToolResultMessage, createUserMessage } from '@dee
 import { ToolRuntime } from '@deepseek-ai/dsh-tools'
 
 import { apply } from '../src/index.js'
-import { APOPHISCODE_MODEL_IDS } from '../src/catalog.js'
+import { APOPHISCODE_MODEL_IDS, MODEL_ROWS, modelRow } from './fixtures/declared-gateway.mjs'
 
 export const PLUGIN_TEST_KEY = 'sk-apophis-host-offline-fixture'
 export const PLUGIN_TEST_PROVIDER = 'apophiscode'
@@ -32,7 +32,7 @@ export const textOf = assembled => assembled.blocks().filter(block => block.type
 export async function createPluginHost(t, {
   config = {}, respond, tool = memoryTool, key = PLUGIN_TEST_KEY, records = new Map(),
   applyPlugin = apply, realFetch = false,
-  modelIds = APOPHISCODE_MODEL_IDS,
+  modelIds = MODEL_ROWS.map(row => row.id),
 } = {}) {
   if (realFetch) assert.match(config.apiHost, /^http:\/\/127\.0\.0\.1:\d+$/u, 'real network fixtures stay on an explicit loopback server')
   else assert.equal(typeof respond, 'function', 'an explicit network fixture is required')
@@ -104,7 +104,7 @@ export async function createPluginHost(t, {
     if (request.method === 'GET' && new URL(request.url).pathname.endsWith('/v1/models')) {
       const ids = typeof modelIds === 'function' ? modelIds(request) : modelIds
       return ids === null ? new Response('model list unavailable', { status: 503 })
-        : Response.json({ data: ids.map(id => ({ id })) })
+        : Response.json({ data: ids.map(id => typeof id === 'string' ? modelRow(id) : id) })
     }
     if (request.method === 'GET' && new URL(request.url).pathname.endsWith('/api/v1/model-plaza')) {
       return Response.json({ code: 0, data: { groups: [] } })
@@ -130,7 +130,7 @@ export async function createPluginHost(t, {
     const prepared = await adapter.prepareCall(PLUGIN_TEST_PROVIDER, model, controls.signal)
     const assembled = new BlockAssembler(), chunks = []
     const options = {
-      sessionId: session.id, reasoningEffort: model === 'deepseek-v4-pro' ? 'high' : 'low', maxTokens: 2048,
+      sessionId: session.id, maxTokens: 2048,
       system: 'You are an assistant inside DeepSeek Harness. Use only the supplied DSH tools.',
       tools: runtime.schemas(agent), messages, ...controls, provider: PLUGIN_TEST_PROVIDER, model,
     }

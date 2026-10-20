@@ -1,3 +1,4 @@
+import { MODEL_ROWS, mockGateway, modelRow } from './fixtures/declared-gateway.mjs'
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
@@ -7,7 +8,7 @@ import { ApophisCodeKeyRing } from '../src/key-ring.js'
 import { fieldValue } from '../src/preferences.js'
 import { anthropicStream } from './fixtures/anthropic.mjs'
 import { credentialKey } from '@deepseek-ai/dsh-credentials'
-import { APOPHISCODE_MODEL_IDS } from '../src/catalog.js'
+import { APOPHISCODE_MODEL_IDS } from './fixtures/declared-gateway.mjs'
 
 /**
  * A context that records what the plugin registers. Every service this plugin
@@ -90,7 +91,7 @@ test('the independent Apophis plugin streams with its stored key and leaves the 
   t.mock.method(globalThis, 'fetch', async (input, init) => {
     const request = new Request(input, init)
     if (request.method === 'GET') return new URL(request.url).pathname.endsWith('/v1/models')
-      ? Response.json({ data: APOPHISCODE_MODEL_IDS.map(id => ({ id })) })
+      ? Response.json({ data: APOPHISCODE_MODEL_IDS.map(modelRow) })
       : Response.json({ code: 0, data: { groups: [] } })
     const body = await request.json()
     requests.push({ url: request.url, authorization: request.headers.get('authorization'), body })
@@ -118,7 +119,7 @@ test('the independent Apophis plugin streams with its stored key and leaves the 
 
 test('registers one route and one directory entry, and defers the browser surface', async t => {
   t.mock.method(globalThis, 'fetch', async input => new URL(typeof input === 'string' ? input : input.url).pathname.endsWith('/v1/models')
-    ? Response.json({ data: APOPHISCODE_MODEL_IDS.map(id => ({ id })) })
+    ? Response.json({ data: APOPHISCODE_MODEL_IDS.map(modelRow) })
     : Response.json({ code: 0, data: { groups: [] } }))
   const { ctx, registered } = stubContext()
   apply(ctx, { claudeCliPath: NO_CLI })
@@ -165,7 +166,8 @@ test('registers one route and one directory entry, and defers the browser surfac
   assert.deepEqual(cli.value.processes, { live: 0, opened: 0, continued: 0 })
 })
 
-test('native image generation remains registered after CLI delegation is removed', async () => {
+test('native image generation remains registered after CLI delegation is removed', async t => {
+  mockGateway(t, () => assert.fail('only directory reads allowed'))
   const { ctx, registered } = stubContext()
   ctx.attachments = { saveImage() {}, readImage() {} }
   apply(ctx)
@@ -198,7 +200,7 @@ test('Claude turns on a key outside the CLI-only groups stay on HTTP, ignoring 1
     const path = new URL(request.url).pathname
     // The group reading: this key is in cc-sale, which accepts third-party clients.
     if (path === '/v1/chat/completions') return Response.json({ error: { message: '当前令牌未覆盖供应商（已选分组=[cc-sale]）' } }, { status: 400 })
-    if (path === '/v1/models' || path === '/api/pricing') return Response.json({ data: [] })
+    if (path === '/v1/models' || path === '/api/pricing') return Response.json({ data: MODEL_ROWS })
     const body = await request.json()
     requests.push(body)
     return anthropicStream(body.model)
@@ -221,7 +223,9 @@ test('the registered route clarifies only the initiating session cwd and follows
   apply(ctx)
   const requests = []
   t.mock.method(globalThis, 'fetch', async (input, init) => {
-    const body = await new Request(input, init).json(); requests.push(body)
+    const request = new Request(input, init)
+    if (request.method === 'GET') return Response.json({ data: MODEL_ROWS })
+    const body = await request.json(); requests.push(body)
     return anthropicStream(body.model)
   })
   const call = await registered.adapters[0].adapter.prepareCall('apophiscode', 'claude-haiku-5-5')

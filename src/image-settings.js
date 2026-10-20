@@ -1,19 +1,19 @@
-import { DEFAULT_IMAGE_MODEL, IMAGE_MODELS, IMAGE_MODEL_IDS, validateImageOptions } from './image-models.js'
+import { validateImageOptions, validateImageQuality } from './image-models.js'
 import { fieldValue } from './preferences.js'
 
 export function readImagePreference(value = {}) {
   const model = fieldValue(value.imageModel)
-  const imageModel = IMAGE_MODEL_IDS.includes(model) ? model : DEFAULT_IMAGE_MODEL
+  const imageModel = typeof model === 'string' ? model : ''
   const quality = fieldValue(value.imageQuality)
   return {
     imageEnabled: fieldValue(value.imageEnabled) !== false,
     imageModel,
-    imageQuality: IMAGE_MODELS[imageModel].includes(quality) ? quality : 'auto',
+    imageQuality: typeof quality === 'string' && quality !== '' ? quality : 'auto',
   }
 }
 
-/** No request is sent by a settings or credential mutation. */
-export function createImageController({ ring, balance, readPreference, writePreference, isWritable }) {
+/** Settings only read the model directory; image generation requires a tool request. */
+export function createImageController({ ring, balance, readPreference, writePreference, isWritable, availableModels = async () => [], invalidateModels = () => {} }) {
   let mounted
   let disposeTool
   let generation = 0
@@ -27,14 +27,20 @@ export function createImageController({ ring, balance, readPreference, writePref
     if (enabled && disposeTool === undefined) disposeTool = mounted()
     if (!enabled && disposeTool !== undefined) { disposeTool(); disposeTool = undefined }
   }
-  const status = async () => ({
-    ...preference(),
-    ...(await ring.list()),
-    writable: isWritable() === true,
-    available: mounted !== undefined,
-    toolRegistered: disposeTool !== undefined,
-    models: IMAGE_MODEL_IDS.map(id => ({ id, qualities: [...IMAGE_MODELS[id]] })),
-  })
+  const status = async () => {
+    let models = [], modelError
+    try { models = await availableModels() }
+    catch { modelError = 'ApophisCode image model list could not be read; check the active image key and gateway' }
+    return {
+      ...preference(),
+      ...(await ring.list()),
+      writable: isWritable() === true,
+      available: mounted !== undefined,
+      toolRegistered: disposeTool !== undefined,
+      models: models.map(row => ({ id: row.id, qualities: ['auto', ...(row.image_qualities ?? []).filter(value => value !== 'auto')] })),
+      ...(modelError === undefined ? {} : { modelError }),
+    }
+  }
   return {
     preference,
     status,
@@ -71,11 +77,9 @@ export function createImageController({ ring, balance, readPreference, writePref
       if (Object.hasOwn(value, 'imageModel')) patch.imageModel = value.imageModel
       if (Object.hasOwn(value, 'imageQuality')) patch.imageQuality = value.imageQuality
       const next = { ...preference(), ...patch }
-      // Changing engines resets an incompatible saved quality; explicit
-      // incompatible choices are rejected before persisting anything.
-      if (patch.imageModel !== undefined && patch.imageQuality === undefined
-        && !IMAGE_MODELS[patch.imageModel]?.includes(next.imageQuality)) patch.imageQuality = next.imageQuality = 'auto'
-      validateImageOptions({ model: next.imageModel, quality: next.imageQuality })
+      validateImageQuality(next.imageQuality)
+      if (patch.imageModel !== undefined && patch.imageModel !== '' && !(await availableModels()).some(row => row.id === patch.imageModel)) throw new Error('ApophisCode image model is absent from the active image key model list')
+      if (next.imageModel !== '') validateImageOptions({ model: next.imageModel, quality: next.imageQuality })
       try { await writePreference(patch) } catch { throw new Error('ApophisCode could not save the image settings') }
       await reconcile()
       return status()
@@ -90,6 +94,7 @@ export function createImageController({ ring, balance, readPreference, writePref
       }
       if (!Object.hasOwn(operations, operation)) throw new Error('Unknown ApophisCode image key operation')
       await operations[operation]()
+      invalidateModels()
       balance?.invalidate()
       await reconcile()
       return status()

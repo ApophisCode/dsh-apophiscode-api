@@ -25,7 +25,7 @@ test('the registered picker and settings preserve every exact active-key ID and 
 })
 
 for (const model of IDS) {
-  test(`${model}: exact Responses ID, default high and a real two-turn tool loop`, async t => {
+  test(`${model}: exact Responses ID, server default and a real two-turn tool loop`, async t => {
     const host = await createPluginHost(t, { applyPlugin: plugin.apply, modelIds: IDS, respond: ({ index }) => eventStream(responseFrames(model,
       index === 1 ? { tool: { id: 'call_family', name: 'lookup_memory', argumentsParts: ['{"query":"中文📦"}'] } }
         : { textParts: ['已读取', '中文📦。'] }), { bytewise: true }),
@@ -36,8 +36,8 @@ for (const model of IDS) {
     for (const call of result.requests) {
       assert.equal(call.url, 'https://www.apophis.uk/v1/responses')
       assert.equal(call.body.model, model)
-      assert.equal(call.body.reasoning.effort, 'high')
-      assert.equal(call.body.prompt_cache_key, undefined)
+      assert.equal(call.body.reasoning, undefined)
+      assert.equal(call.body.prompt_cache_key, 'plugin-host-fixture-session')
     }
   })
 
@@ -64,27 +64,32 @@ test('unknown key coverage fails visibly and never advertises the whole catalog'
   assert.match(reply.error.message, /coverage|model list/iu)
 })
 
-test('unknown metadata remains visible and resolvable beside known models, but invocation makes zero POSTs', async t => {
+test('unknown DeepSeek efforts stay unknown while the requested Responses policy preserves business rejection', async t => {
   const unknown = 'deepseek-future-unknown'
   const host = await createPluginHost(t, { applyPlugin: plugin.apply, modelIds: ['deepseek-v4-pro', unknown],
-    respond: () => eventStream(responseFrames('deepseek-v4-pro', { textParts: ['已知型号仍可回答。'] })),
+    respond: ({ body }) => body.model === unknown
+      ? Response.json({ error: { message: 'unknown model' } }, { status: 404 })
+      : eventStream(responseFrames('deepseek-v4-pro', { textParts: ['已知型号仍可回答。'] })),
   })
   const listed = await host.adapter.listModels('apophiscode')
   assert.deepEqual(listed.map(model => model.id), ['deepseek-v4-pro', unknown])
   const info = await Promise.all(listed.map(model => host.adapter.resolveModel('apophiscode', model.id)))
-  assert.deepEqual(info[1], { provider: 'apophiscode', id: unknown, name: unknown,
-    description: 'ApophisCode has no verified protocol and capability metadata for this model; invocation is unavailable' })
+  assert.deepEqual(info[1], { provider: 'apophiscode', id: unknown, name: unknown })
   assert.equal(info[1].context, undefined)
-  assert.match((await host.rpc('models/status')).value.models[1].unavailableReason, /metadata/u)
-  await assert.rejects(host.adapter.prepareCall('apophiscode', unknown), /metadata/u)
-  await assert.rejects(async () => {
-    for await (const _ of host.adapter.stream({ provider: 'apophiscode', model: unknown, messages: [] })) { /* Drain the real adapter. */ }
-  }, /metadata/u)
-  assert.equal(host.requests.length, 0)
+  assert.equal((await host.rpc('models/status')).value.models[1].unavailableReason, undefined)
+  await host.adapter.prepareCall('apophiscode', unknown)
+  assert.equal(host.requests.length, 0, 'the explicit family policy does not probe')
+  const rejected = await host.turn({ model: unknown, prompt: 'fixture business content' })
+  assert.equal(rejected.assembled.finish.kind, 'error')
+  assert.match(rejected.assembled.finish.failure.message, /unknown model/u)
+  assert.equal(host.requests.length, 1)
+  assert.equal(new URL(host.requests[0].url).pathname, '/v1/responses')
+  assert.equal(host.requests[0].body.stream, true)
+  assert.ok(JSON.stringify(host.requests[0].body).includes('fixture business content'))
   const known = await host.turn({ model: 'deepseek-v4-pro', reasoningEffort: undefined })
   assert.equal(known.assembled.finish.kind, 'stop')
   assert.equal(textOf(known.assembled), '已知型号仍可回答。')
-  assert.equal(host.requests.length, 1)
+  assert.equal(host.requests.length, 2)
 })
 
 test('switching the active key replaces the directory rather than unioning enabled keys; refresh follows removals', async t => {
@@ -146,34 +151,27 @@ test('DeepSeek Pro refuses unsupported low effort before any model POST', async 
   const host = await createPluginHost(t, { applyPlugin: plugin.apply, modelIds: IDS,
     respond: () => assert.fail('unsupported effort must not send a model POST'),
   })
-  await assert.rejects(host.turn({ model: 'deepseek-v4-pro', reasoningEffort: 'low' }), /does not support reasoning effort "low"/u)
+  await assert.rejects(host.turn({ model: 'deepseek-v4-pro', reasoningEffort: 'low' }), error => error.code === 'UNSUPPORTED_REASONING_EFFORT')
   assert.equal(host.requests.length, 0)
 })
 
 for (const olderId of ['deepseek-v4-flash', 'deepseek-future-unknown']) {
   for (const first of ['older', 'newer']) {
-    test(`concurrent discovery retains each call's directory when ${first} reaches auth first (${olderId})`, async t => {
-      let finishOlder, finishNewer, releaseAuth, enteredAuth, reads = 0, authReads = 0
-      const authEntered = new Promise(resolve => { enteredAuth = resolve })
-      const ring = { activeKey: async () => {
-        if (++authReads === 1) { enteredAuth(); await new Promise(resolve => { releaseAuth = resolve }) }
-        return { id: 'fixture-current', key: 'sk-offline-concurrency-fixture' }
-      } }
+    test(`concurrent discovery retains each call's directory when ${first} finishes first (${olderId})`, async () => {
+      let finishOlder, finishNewer, entered, reads = 0
+      const directoriesEntered = new Promise(resolve => { entered = resolve })
+      const ring = { activeKey: async () => ({ id: 'fixture-current', key: 'sk-offline-concurrency-fixture' }) }
       const adapter = plugin.createRouteAdapter({ ring, keys: {}, availableModelIds: () => ++reads === 1
-        ? new Promise(resolve => { finishOlder = resolve }) : new Promise(resolve => { finishNewer = resolve }) })
-      t.after(() => releaseAuth?.())
+        ? new Promise(resolve => { finishOlder = resolve }) : new Promise(resolve => { finishNewer = resolve; entered() }) })
       const older = adapter.listModels('apophiscode'), newer = adapter.listModels('apophiscode')
+      await directoriesEntered
       if (first === 'newer') finishNewer(new Set(['deepseek-v4-pro']))
       else finishOlder(new Set([olderId]))
-      await authEntered
       if (first === 'newer') { finishOlder(new Set([olderId])); await older }
       else { finishNewer(new Set(['deepseek-v4-pro'])); await newer }
-      releaseAuth()
       assert.deepEqual((await older).map(model => model.id), [olderId])
       assert.deepEqual((await newer).map(model => model.id), ['deepseek-v4-pro'])
-      // The host's current profile must represent the latest-started lookup,
-      // even after an older unknown row completes out of order.
-      assert.equal(adapter.current().profiles.get('apophiscode').modelErrors.has('deepseek-future-unknown'), false)
+      assert.deepEqual(await adapter.listModels('other-provider'), [])
     })
   }
 }

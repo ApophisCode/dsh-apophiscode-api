@@ -1,5 +1,4 @@
 /** Profile preferences for the models advertised in ApophisCode's picker. */
-import { modelMetadataError, APOPHISCODE_MODEL_IDS } from './catalog.js'
 import { fieldValue } from './preferences.js'
 
 /** Store exclusions so new catalog models are selected by default as well. */
@@ -11,8 +10,8 @@ export function readHiddenModels(preference) {
 
 export function createModelSelectionController({ readPreference, writePreference, isWritable, onChange, availableModelIds }) {
   const hidden = () => readHiddenModels(readPreference())
-  let directoryIds = new Set(APOPHISCODE_MODEL_IDS)
-  const visibleSignature = () => hidden().filter(id => directoryIds.has(id)).join(',')
+  let directoryIds
+  const visibleSignature = () => JSON.stringify(hidden().filter(id => directoryIds === undefined || directoryIds.has(id)))
   let advertised = visibleSignature()
 
   const reconcile = () => {
@@ -23,14 +22,13 @@ export function createModelSelectionController({ readPreference, writePreference
   }
 
   const project = covered => {
-    directoryIds = new Set(covered ?? APOPHISCODE_MODEL_IDS)
+    directoryIds = new Set(covered ?? [])
     advertised = visibleSignature()
     const excluded = new Set(hidden())
     return {
       writable: isWritable() === true,
       models: [...directoryIds].map(id => {
-        const error = modelMetadataError(id)
-        return { id, name: id, selected: !excluded.has(id), ...(error === undefined ? {} : { unavailableReason: error }) }
+        return { id, name: id, selected: !excluded.has(id) }
       }),
     }
   }
@@ -42,12 +40,13 @@ export function createModelSelectionController({ readPreference, writePreference
     refresh: () => onChange?.(),
     isVisible: id => !hidden().includes(id),
     async update({ selectedIds } = {}) {
-      const currentIds = availableModelIds === undefined ? new Set(APOPHISCODE_MODEL_IDS) : await availableModelIds()
+      const currentIds = availableModelIds === undefined ? new Set() : await availableModelIds()
       if (!Array.isArray(selectedIds) || selectedIds.some(id => !currentIds.has(id))) {
         throw new Error('That ApophisCode model selection is not supported')
       }
       if (isWritable() !== true) throw new Error('ApophisCode settings are not writable in this profile')
       const selected = new Set(selectedIds)
+      directoryIds = new Set(currentIds)
       try {
         await writePreference({ hiddenModels: [...hidden().filter(id => !currentIds.has(id)), ...[...currentIds].filter(id => !selected.has(id))] })
       } catch {

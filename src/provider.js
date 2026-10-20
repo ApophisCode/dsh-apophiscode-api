@@ -17,6 +17,9 @@ import { createClaudeApi } from './claude-api.js'
 import { DISPLAY_NAME, PROVIDER } from './constants.js'
 import { createGeminiApi } from './gemini-api.js'
 import { redactSecrets } from './secret-redactor.js'
+import { MESSAGES_REQUEST_BUDGET } from './model-protocol.js'
+import { reasoningReference } from './model-reasoning.js'
+import { currentRequest } from './request-context.js'
 import {
   CLI_MARK,
   classifyCliOutdated,
@@ -82,13 +85,13 @@ function explicitTargetApi(api) {
  * @param options - `apiHost`, the configured gateway root, and `claudeCli`,
  *   the explicitly configured Claude Code CLI transport selector.
  */
-export function createApophisCodeProvider({ apiHost, claudeCli, modelIds } = {}) {
+export function createApophisCodeProvider({ apiHost, claudeCli, models = [] } = {}) {
   const provider = createProvider({
     id: PROVIDER,
     name: DISPLAY_NAME,
     baseUrl: modelApiHost(apiHost),
     auth: keyRingAuth(),
-    models: createApophisCodeCatalog(apiHost, { modelIds, includeLegacy: true }),
+    models: createApophisCodeCatalog(apiHost, { models }),
     api: {
       'openai-completions': explicitTargetApi(openAICompletionsApi()),
       'openai-responses': explicitTargetApi(openAIResponsesApi()),
@@ -96,17 +99,68 @@ export function createApophisCodeProvider({ apiHost, claudeCli, modelIds } = {})
       'google-generative-ai': createGeminiApi(),
     },
   })
-  // Only GPT's Responses route requires prompt_cache_key here. Sending it
-  // to Grok makes the gateway return a misleading upstream API-key error.
-  // pi-ai's public cacheRetention option omits this field without changing
-  // the model, protocol, reasoning, session headers, or credential source.
-  const requestOptions = (model, options) => model.api === 'openai-responses' && !model.id.startsWith('gpt-')
-    ? { ...options, cacheRetention: 'none' }
-    : options
+  // Native stream preserves server defaults. Only an explicit effort with an
+  // exact SDK reference may use that supplier's simple-to-native encoder.
+  const requestOptions = (model, options, sdkEncoding = false, callerMaxTokens) => ({
+    ...options,
+    ...(model.api === 'anthropic-messages' && options?.maxTokens === undefined
+      ? { maxTokens: MESSAGES_REQUEST_BUDGET } : {}),
+    // The native codecs still contain vendor-name defaults. Remove inferred
+    // reasoning controls; only a caller's explicit, declared effort is sent.
+    onPayload: async payload => {
+      const effort = currentRequest()?.reasoningEffort ?? options?.reasoningEffort ?? options?.reasoning
+      if (sdkEncoding) {
+        // The exact supplier descriptor and SDK codec own explicit parameter
+        // encoding, including budget-based versus adaptive reasoning.
+        if (model.api === 'anthropic-messages' && callerMaxTokens !== undefined) {
+          payload.max_tokens = Math.min(payload.max_tokens, callerMaxTokens)
+          if (payload.thinking?.type === 'enabled' && payload.thinking.budget_tokens >= payload.max_tokens) {
+            throw new Error('ApophisCode output limit is too small for the selected thinking budget; increase the output limit or select another effort. The effort was not lowered.')
+          }
+        }
+        return await options?.onPayload?.(payload, model) ?? payload
+      }
+      if (model.api === 'openai-completions') {
+        delete payload.reasoning_effort
+        delete payload.thinking
+        if (effort !== undefined) payload.reasoning_effort = effort === 'off' ? 'none' : effort
+      } else if (model.api === 'openai-responses') {
+        delete payload.reasoning
+        if (effort !== undefined) {
+          payload.reasoning = { effort: effort === 'off' ? 'none' : effort }
+          if (effort !== 'off') payload.include = [...new Set([...(payload.include ?? []), 'reasoning.encrypted_content'])]
+        }
+      } else if (model.api === 'anthropic-messages') {
+        delete payload.thinking
+        if (payload.output_config) delete payload.output_config.effort
+        if (effort === 'off') payload.thinking = { type: 'disabled' }
+        else if (effort !== undefined) payload.output_config = { ...payload.output_config, effort }
+      } else if (model.api === 'google-generative-ai') {
+        delete payload.config?.thinkingConfig
+        if (effort !== undefined) payload.config = { ...payload.config, thinkingConfig: effort === 'off'
+          ? { thinkingBudget: 0 } : { includeThoughts: true, thinkingLevel: effort.toUpperCase() } }
+      }
+      return await options?.onPayload?.(payload, model) ?? payload
+    },
+  })
+  const stream = (model, context, options) => {
+    const effort = currentRequest()?.reasoningEffort ?? options?.reasoningEffort ?? options?.reasoning
+    const reference = model.reasoningSource === 'sdk' ? reasoningReference(model.id)?.reference : undefined
+    if (effort !== undefined && reference?.api === model.api) {
+      // Supplier limits are used only by its encoder; they are never exposed as
+      // gateway capacities. The caller's cap wins; omitted caps use our budget.
+      const requestModel = { ...reference, ...model, compat: reference.compat }
+      return provider.streamSimple(requestModel, context, requestOptions(requestModel, { ...options,
+        reasoning: effort === 'off' ? undefined : effort,
+        maxTokens: options?.maxTokens ?? MESSAGES_REQUEST_BUDGET,
+      }, true, options?.maxTokens))
+    }
+    return provider.stream(model, context, requestOptions(model, options))
+  }
   return Object.freeze({
     ...provider,
-    stream: (model, context, options) => provider.stream(model, context, requestOptions(model, options)),
-    streamSimple: (model, context, options) => provider.streamSimple(model, context, requestOptions(model, options)),
+    stream,
+    streamSimple: stream,
   })
 }
 

@@ -14,7 +14,7 @@ import { en, zh } from './client-copy.js'
 import { updateFailureCopy } from './plugin-update-errors.js'
 import { STYLE } from './client-style.js'
 import { installImagePresentation, ApophisCodeImagesCard, ApophisCodeImageShortcut } from './client-images.jsx'
-import { fill, KeyBalance, QuotaHover } from './client-balance.jsx'
+import { fill, balanceFailureCopy, KeyBalance, QuotaHover } from './client-balance.jsx'
 import { KeyRenameForm, useKeyRename } from './client-key-rename.jsx'
 import { DiagnosticsCard } from './client-diagnostics.jsx'
 
@@ -28,18 +28,8 @@ const INVITE_URL = 'https://www.apophis.uk/'
 const SEARCH_SETTLE_MS = 1_500
 /** While the CLI installs, the panel polls its status this often. */
 const INSTALL_POLL_MS = 2_000
-const CLAUDE_MODELS = ['claude-opus-5-5', 'claude-sonnet-5-5', 'claude-haiku-5-5']
 const OWN_SEARCH_IDS = { auto: 'apophiscode-api-auto', apophiscode: 'apophiscode-api' }
 const FOREIGN_NAMES = { codex: 'Codex', kimi: 'Kimi' }
-/** The catalog's models by family, for the "reaches" line under each key. */
-const MODEL_FAMILIES = [
-  ['DeepSeek', ['deepseek-flash']],
-  ['GPT', ['gpt-6.1-sol', 'gpt-6-astra', 'gpt-5.6-sol']],
-  ['Grok', ['grok-4.7']],
-  ['Gemini', ['gemini-4-argon', 'gemini-3.8-flash']],
-  ['Claude', ['claude-opus-5-5', 'claude-sonnet-5-5', 'claude-haiku-5-5']],
-]
-
 // ── helpers ─────────────────────────────────────────────────────────────────
 
 /**
@@ -65,17 +55,6 @@ function clearMessage(error) {
 function activeUsage(balance) {
   if (balance === undefined) return undefined
   return balance.keys?.find(entry => entry.id === balance.activeId) ?? balance.keys?.[0]
-}
-
-/** Which catalog families a key reaches, from its per-model coverage. */
-function reachOf(coverage) {
-  return MODEL_FAMILIES.flatMap(([name, models]) => {
-    const known = models.filter(id => typeof coverage?.[id] === 'boolean')
-    if (known.length === 0) return []
-    const reached = known.filter(id => coverage[id] === true)
-    const state = reached.length === 0 ? 'no' : reached.length === known.length ? 'ok' : 'partial'
-    return [{ name, state, reached, missing: known.filter(id => coverage[id] === false) }]
-  })
 }
 
 // ── primitives ──────────────────────────────────────────────────────────────
@@ -117,60 +96,7 @@ function Segmented({ label, options, value, disabled, onChange }) {
 
 // ── accounts and keys ───────────────────────────────────────────────────────
 
-/** A key's groups and what they reach. */
-function KeyGroups({ group, descriptions, loading, t }) {
-  if (group === undefined) {
-    return loading ? <span className="apc-meta">{t('groupsChecking')}</span> : null
-  }
-  if (group.rejected === true) return <span className="apc-error">{t('groupsRejected')}</span>
-  const reach = reachOf(group.coverage)
-  const names = Array.isArray(group.groups) ? group.groups : []
-  return (
-    <>
-      <div className="apc-groups">
-        <span className="apc-label">{t('groupsTitle')}</span>
-        {names.length === 0
-          ? <span className="apc-meta">{group.error === undefined ? group.membershipUnavailable ? t('groupsMembershipUnavailable') : '—' : `${t('groupsUnknown')}: ${group.error}`}</span>
-          : names.map(name => <span className="apc-tag" key={name} title={descriptions?.[name] ?? name}>{name}</span>)}
-      </div>
-      {reach.length > 0 && (
-        <div className="apc-reach">
-          {reach.map(family => (
-            <span
-              key={family.name}
-              data-state={family.state}
-              title={[...family.reached.map(id => `✓ ${id}`), ...family.missing.map(id => `✗ ${id}`)].join('\n')}
-            >
-              {family.state === 'ok' ? '✓' : family.state === 'partial' ? '◐' : '✕'} {family.name}
-              {family.state === 'partial' && ` (${t('groupsPartial')})`}
-            </span>
-          ))}
-        </div>
-      )}
-      <ClaudeRoute group={group} t={t} />
-      {group.stale !== undefined && <span className="apc-warn">{`${t('groupsStale')}: ${group.stale.error}`}</span>}
-    </>
-  )
-}
-
-/** Which transport this key's Claude requests take, when the key reaches Claude. */
-function ClaudeRoute({ group, t }) {
-  const route = group.claudeTransport
-  if (route === undefined || !CLAUDE_MODELS.some(id => group.coverage?.[id] === true)) return null
-  const pinned = route.reason === 'preference' ? t('keyClaudePinned') : ''
-  const hint = route.transport === 'cli'
-    ? `${fill(t('keyClaudeCliHint'), { groups: (route.groups ?? []).join(' / ') || 'cc' })}${pinned}`
-    : `${t('keyClaudeHttpHint')}${pinned}`
-  return (
-    <div className="apc-groups">
-      <span className="apc-chip" data-tone={route.transport === 'cli' ? 'info' : 'neutral'} title={hint}>
-        {route.transport === 'cli' ? t('keyClaudeCli') : t('keyClaudeHttp')}
-      </span>
-    </div>
-  )
-}
-
-function KeyRow({ entry, row, group, descriptions, groupsLoading, busy, rename, onAction, t }) {
+function KeyRow({ entry, row, busy, rename, onAction, t }) {
   const editing = rename.renaming?.id === entry.id
 
   return (
@@ -194,7 +120,6 @@ function KeyRow({ entry, row, group, descriptions, groupsLoading, busy, rename, 
         )}
       </div>
       <KeyBalance row={row} t={t} />
-      <KeyGroups group={group} descriptions={descriptions} loading={groupsLoading} t={t} />
     </div>
   )
 }
@@ -216,42 +141,44 @@ function RegisterInvite({ t }) {
 function AccountsCard({ call, t, onModelsChanged }) {
   const [status, setStatus] = react.useState()
   const [balance, setBalance] = react.useState()
-  const [groups, setGroups] = react.useState()
-  const [groupsLoading, setGroupsLoading] = react.useState(true)
-  const [groupsError, setGroupsError] = react.useState()
+  const [balanceError, setBalanceError] = react.useState()
   const [busy, setBusy] = react.useState(false)
+  const [refreshing, setRefreshing] = react.useState(false)
   const [error, setError] = react.useState()
   const [draft, setDraft] = react.useState({ key: '', label: '' })
   const generation = react.useRef(0)
 
-  const readGroups = react.useCallback((force = false) => {
-    setGroupsLoading(true)
-    setGroupsError(undefined)
-    return call('groups', { force })
-      .then(setGroups)
-      .catch(failure => setGroupsError(clearMessage(failure)))
-      .finally(() => setGroupsLoading(false))
-      .then(() => { if (force) onModelsChanged() })
-  }, [call, onModelsChanged])
-
   const load = react.useCallback((force = false) => {
     const current = ++generation.current
     setBusy(true)
+    setRefreshing(true)
     setError(undefined)
-    void readGroups(force)
-    return Promise.all([call('status'), call('balance', { force })])
-      .then(([nextStatus, nextBalance]) => {
-        if (generation.current !== current) return
-        setStatus(nextStatus)
-        setBalance(nextBalance)
-      })
+    setBalanceError(undefined)
+    // Manual refresh reads only the active key's directory. Even a failed
+    // read replaces the model card so an old directory cannot look current.
+    const refreshModels = force ? call('models/status', { force: true })
       .catch(failure => {
         if (generation.current === current) setError({ kind: 'read', message: clearMessage(failure) })
       })
+      .finally(() => { if (generation.current === current) onModelsChanged() }) : undefined
+    // Credential state remains usable even when the independent balance read fails.
+    const readStatus = call('status').then(nextStatus => {
+      if (generation.current === current) setStatus(nextStatus)
+    }).catch(failure => {
+      if (generation.current === current) setError({ kind: 'read', message: clearMessage(failure) })
+    }).finally(() => {
+      if (generation.current === current) setBusy(false)
+    })
+    const readBalance = call('balance', { force }).then(nextBalance => {
+      if (generation.current === current) setBalance(nextBalance)
+    }).catch(failure => {
+      if (generation.current === current) setBalanceError(clearMessage(failure))
+    })
+    return Promise.all([readStatus, readBalance, refreshModels])
       .finally(() => {
-        if (generation.current === current) setBusy(false)
+        if (generation.current === current) setRefreshing(false)
       })
-  }, [call, readGroups])
+  }, [call, onModelsChanged])
 
   react.useEffect(() => {
     load(false)
@@ -262,20 +189,29 @@ function AccountsCard({ call, t, onModelsChanged }) {
 
   /** A refused change says so; a balance read after a stored change is a read. */
   const mutate = (endpoint, payload) => {
+    const current = ++generation.current
     setBusy(true)
+    setRefreshing(false)
     setError(undefined)
+    setBalanceError(undefined)
     return call(endpoint, payload)
       .then(
         nextStatus => {
+          if (generation.current !== current) return
           setStatus(nextStatus)
           if (endpoint !== 'keys/rename') onModelsChanged()
-          void readGroups(false)
-          return call('balance', { force: true })
-            .then(setBalance, failure => setError({ kind: 'read', message: clearMessage(failure) }))
+          setRefreshing(true)
+          void call('balance', { force: true })
+            .then(nextBalance => {
+              if (generation.current === current) setBalance(nextBalance)
+            }, failure => {
+              if (generation.current === current) setBalanceError(clearMessage(failure))
+            })
+            .finally(() => { if (generation.current === current) setRefreshing(false) })
         },
-        failure => setError({ kind: 'save', message: clearMessage(failure) }),
+        failure => { if (generation.current === current) setError({ kind: 'save', message: clearMessage(failure) }) },
       )
-      .finally(() => setBusy(false))
+      .finally(() => { if (generation.current === current) setBusy(false) })
   }
 
   const addKey = event => {
@@ -293,7 +229,7 @@ function AccountsCard({ call, t, onModelsChanged }) {
       title={t('accountsTitle')}
       aside={(
         <span className="apc-actions">
-          <Button disabled={busy} onClick={() => load(true)}>{busy ? t('refreshing') : t('refresh')}</Button>
+          <Button disabled={busy || refreshing} onClick={() => load(true)}>{busy || refreshing ? t('refreshing') : t('refresh')}</Button>
           {keys.length > 0 && <Button variant="danger" disabled={busy} onClick={() => mutate('keys/remove-all', {})}>{t('removeAll')}</Button>}
         </span>
       )}
@@ -314,9 +250,6 @@ function AccountsCard({ call, t, onModelsChanged }) {
                   key={entry.id}
                   entry={entry}
                   row={rows.find(row => row.id === entry.id)}
-                  group={groups?.keys?.find(group => group.id === entry.id)}
-                  descriptions={groups?.descriptions}
-                  groupsLoading={groupsLoading}
                   busy={busy}
                   rename={rename}
                   onAction={mutate}
@@ -348,11 +281,9 @@ function AccountsCard({ call, t, onModelsChanged }) {
           <Button type="submit" variant="primary" size="md" disabled={busy || draft.key.trim() === ''}>{t('add')}</Button>
         </div>
       </form>
-      {groupsError !== undefined && <p className="apc-error" role="alert">{`${t('groupsUnknown')}: ${groupsError}`}</p>}
-      {groups?.directoryError !== undefined && <p className="apc-warn">{`${t('groupsDirectoryFailed')}: ${groups.directoryError}`}</p>}
-      {groups?.directoryStale !== undefined && <p className="apc-warn">{`${t('groupsDirectoryStale')}: ${groups.directoryStale.error}`}</p>}
       {status !== undefined && status.writable !== true && <p className="apc-note">{t('notWritable')}</p>}
       {error !== undefined && <p className="apc-error" role="alert">{`${t(error.kind === 'save' ? 'saveError' : 'error')}: ${error.message}`}</p>}
+      {balanceError !== undefined && <p className="apc-warn" role="status">{`${t('balanceUnavailable')}：${balanceFailureCopy(balanceError, t)}`}</p>}
       <details className="apc-advanced">
         <summary>{t('advanced')}</summary>
         <label className="apc-field">
@@ -483,8 +414,8 @@ function SearchCard({ call, t }) {
   }
 
   const mode = state?.searchProvider
-  const backend = state?.searchBackend
-  const models = state?.models ?? {}
+  const model = state?.searchModel
+  const models = state?.models ?? []
   const base = state?.effective?.base
   const runtime = state?.effective?.runtime
   const foreign = Object.entries(state?.foreign ?? {}).filter(([, present]) => present).map(([name]) => FOREIGN_NAMES[name] ?? name)
@@ -492,12 +423,10 @@ function SearchCard({ call, t }) {
   const overridden = expected !== undefined && state?.applied?.state === 'applied' && base !== undefined && base !== expected
   const disabled = busy || state?.writable !== true
   const modeHint = { default: 'searchModeDefaultHint', auto: 'searchModeAutoHint', apophiscode: 'searchModeApophisCodeHint' }[mode]
-  const backendHint = backend === 'gpt'
-    ? fill(t('searchBackendGptHint'), { model: models.gpt ?? 'gpt-6.1-sol' })
-    : fill(t('searchBackendDeepseekHint'), { model: models.deepseek ?? 'deepseek-flash' })
 
   return (
     <Card title={t('searchTitle')} aside={<span className="apc-chip" data-tone="neutral">{t('searchScope')}</span>}>
+      {state?.modelError && <p className="apc-error" role="alert">{state.modelError}</p>}
       <p className="apc-note">{t('searchIntro')}</p>
       {state === undefined && error === undefined && <p className="apc-note" role="status">{t('searchChecking')}</p>}
       {state !== undefined && (
@@ -520,19 +449,13 @@ function SearchCard({ call, t }) {
             </div>
           </div>
           <div className="apc-setting">
-            <span className="apc-label">{t('searchBackendTitle')}</span>
+            <span className="apc-label">{t('searchModelTitle')}</span>
             <div>
-              <Segmented
-                label={t('searchBackendTitle')}
-                value={backend}
-                disabled={disabled}
-                onChange={value => update({ searchBackend: value })}
-                options={[
-                  { value: 'deepseek', label: t('searchBackendDeepseek') },
-                  { value: 'gpt', label: t('searchBackendGpt') },
-                ]}
-              />
-              <p className="apc-note">{backendHint}</p>
+              <select className="apc-input" value={model} disabled={disabled} onChange={event => update({ searchModel: event.target.value })}>
+                <option value="">{t('searchModelDefault')}</option>
+                {models.map(row => <option key={row.id} value={row.id}>{row.id}</option>)}
+              </select>
+              <p className="apc-note">{t('searchModelHint')}</p>
             </div>
           </div>
           {state.available === true && (base !== undefined || runtime !== undefined) && (
@@ -813,8 +736,8 @@ function ApophisCodeSection({ rpc, t }) {
       <ApophisCodeImagesCard call={call} t={t} />
       <ClaudeCliCard call={call} t={t} />
       {/* A new directory discards the previous rows, errors and pending replies. */}
-      <ModelsCard key={modelRevision} call={call} t={t} />
-      <SearchCard call={call} t={t} />
+      <ModelsCard key={`models-${modelRevision}`} call={call} t={t} />
+      <SearchCard key={`search-${modelRevision}`} call={call} t={t} />
       <VersionCard call={call} t={t} />
       <DiagnosticsCard call={call} t={t} />
     </div>

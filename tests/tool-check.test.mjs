@@ -1,7 +1,8 @@
+import { mockGateway } from './fixtures/declared-gateway.mjs'
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { createApophisCodeCatalog } from '../src/catalog.js'
+import { createApophisCodeCatalog } from './fixtures/declared-gateway.mjs'
 import { createToolCheck, main, parseToolCheckArgs } from '../scripts/tool-check.mjs'
 import { chatFrames, eventStream, responseFrames } from './fixtures/openai.mjs'
 import { anthropicStream } from './fixtures/anthropic.mjs'
@@ -14,7 +15,7 @@ test('help and every invalid option return before reading a stored key or creati
   const deps = { readKey: async () => { reads += 1; throw new Error('must not read a key') },
     createCheck: async () => { checks += 1; throw new Error('must not create a check') }, write() {} }
   assert.equal(await main(['--help'], deps), 0)
-  for (const args of [[], ['--model'], ['--model', 'unknown'], ['--model', 'gpt-6.1-sol', '--reasoning', 'off'],
+  for (const args of [[], ['--model'], ['--model', 'gpt-6.1-sol', '--reasoning', 'invalid'],
     ['--model', 'gpt-6.1-sol', '--unknown', 'x'], ['--model', 'gpt-6.1-sol', '--model', 'grok-4.7'],
     ['--model', 'deepseek-v4.1-flash', '--api-host', 'file:///tmp'], ['--model', 'deepseek-v4.1-flash', '--api-host', 'https://user:password@gateway.example'],
     ['--model', 'deepseek-v4.1-flash', '--api-host', 'https://gateway.example?key=secret'],
@@ -26,14 +27,15 @@ test('help and every invalid option return before reading a stored key or creati
   assert.equal(checks, 0)
 })
 
-test('argument parsing accepts every exact catalog ID and only supported model efforts', () => {
+test('argument parsing accepts arbitrary exact IDs without inventing supported efforts', () => {
   for (const model of APOPHISCODE_MODELS) {
     const parsed = parseToolCheckArgs(['--model', model.id])
     assert.equal(parsed.model, model.id)
-    assert.equal(parsed.reasoning, model.id === 'deepseek-v4-pro' ? 'high' : 'low')
+    assert.equal(parsed.reasoning, undefined)
     assert.equal(parsed.timeoutMs, 65000)
     assert.equal(parsed.apiHost, 'https://www.apophis.uk')
   }
+  assert.equal(parseToolCheckArgs(['--model', 'opaque-unlisted-model']).model, 'opaque-unlisted-model')
   assert.equal(parseToolCheckArgs(['--model', 'deepseek-v4.1-flash', '--reasoning', 'off']).reasoning, 'off')
 })
 
@@ -61,7 +63,7 @@ function promptText(body) {
 for (const model of APOPHISCODE_MODELS) {
   test(`the generic live-check composition supports ${model.id} through the built registered adapter and real ToolRuntime`, async t => {
     const requests = []
-    t.mock.method(globalThis, 'fetch', async (input, init) => {
+    mockGateway(t, async (input, init) => {
       const request = new Request(input, init), body = await request.json()
       requests.push({ request, body })
       const first = requests.length === 1

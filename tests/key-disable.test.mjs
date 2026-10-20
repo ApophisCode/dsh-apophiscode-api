@@ -7,7 +7,7 @@ import { createApophisCodeRpc } from '../src/rpc.js'
 import { fakeCredentials } from './helpers.mjs'
 import { anthropicStream } from './fixtures/anthropic.mjs'
 import { createPluginHost, PLUGIN_TEST_KEY } from './plugin-host-fixture.mjs'
-import { APOPHISCODE_MODEL_IDS } from '../src/catalog.js'
+import { MODEL_ROWS } from './fixtures/declared-gateway.mjs'
 
 test('manual disable rotates only this plugin ring and the registered adapter no longer uses that key', async t => {
   const foreignId = credentialKey('other-provider-api', 'keys')
@@ -24,7 +24,7 @@ test('manual disable rotates only this plugin ring and the registered adapter no
   assert.equal(disabled.value.keys[0].disabledReason, 'user-disabled')
   assert.equal(disabled.value.keys[0].label, first.label)
   assert.equal(JSON.stringify(disabled).includes(PLUGIN_TEST_KEY), false)
-  assert.equal((await host.adapter.listModels('apophiscode')).length, APOPHISCODE_MODEL_IDS.length)
+  assert.equal((await host.adapter.listModels('apophiscode')).length, MODEL_ROWS.length)
   await host.turn({ model: 'claude-sonnet-5-5' })
   assert.equal(host.requests.at(-1).headers.get('authorization'), `Bearer ${otherKey}`)
   await host.rpc('keys/disable', { id: second.id })

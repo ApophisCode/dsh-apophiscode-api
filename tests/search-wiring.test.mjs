@@ -7,6 +7,7 @@ import test from 'node:test'
 
 import { apply, Config } from '../src/index.js'
 import { fakeCredentials } from './helpers.mjs'
+import { mockGateway } from './fixtures/declared-gateway.mjs'
 import { fieldValue } from '../src/preferences.js'
 
 const USER_PATCH = '- id: permission\n  config:\n    defaultPreset: danger-full-access\n'
@@ -21,7 +22,7 @@ async function makeContext({ settings: generation = '0.2' } = {}) {
   const patchPath = join(dir, 'cordis.patch.yml')
   await writeFile(patchPath, USER_PATCH)
 
-  const values = { searchProvider: 'default', searchBackend: 'deepseek' }
+  const values = { searchProvider: 'default', searchModel: '' }
   const seen = { updates: [], configured: [], listeners: new Map(), handler: undefined, section: undefined }
   const providers = new Map()
   const dshSearch = { id: 'deepseek-official', available: () => true, search: async () => ({ sources: [{ url: 'https://dsh.example/' }], truncated: false }) }
@@ -103,7 +104,7 @@ async function makeContext({ settings: generation = '0.2' } = {}) {
   }
   // DSH 0.2 hands volatile fields over as live references.
   const config = generation === '0.2'
-    ? { searchProvider: { get: () => values.searchProvider }, searchBackend: { get: () => values.searchBackend } }
+    ? { searchProvider: { get: () => values.searchProvider }, searchModel: { get: () => values.searchModel } }
     : {}
   return {
     ctx,
@@ -135,7 +136,7 @@ async function waitForPatch(path, expected) {
 test('the search preference fields are part of the plugin Config', () => {
   const resolved = new Config({})
   assert.equal(fieldValue(resolved.searchProvider), 'default')
-  assert.equal(fieldValue(resolved.searchBackend), 'deepseek')
+  assert.equal(fieldValue(resolved.searchModel), '')
   assert.throws(() => new Config({ searchProvider: 'everything' }))
 })
 
@@ -154,11 +155,11 @@ test('DSH 0.2: both providers register, and the panel switches routing through t
   const initial = await env.seen.handler('search/status', {})
   assert.equal(initial.ok, true)
   assert.equal(initial.value.searchProvider, 'default')
-  assert.equal(initial.value.searchBackend, 'deepseek')
+  assert.equal(initial.value.searchModel, '')
   assert.equal(initial.value.writable, true)
   assert.equal(initial.value.available, true)
   assert.deepEqual(initial.value.effective, { base: 'deepseek-official', runtime: 'codex-subscription-auto' })
-  assert.deepEqual(initial.value.models, { deepseek: 'deepseek-flash', gpt: 'gpt-6.1-sol' })
+  assert.deepEqual(initial.value.models, [])
   assert.equal(await readFile(env.patchPath, 'utf8'), USER_PATCH, 'the default selection writes nothing')
 
   const auto = await env.seen.handler('search/update', { searchProvider: 'auto' })
@@ -171,11 +172,11 @@ test('DSH 0.2: both providers register, and the panel switches routing through t
   assert.ok(patched.startsWith(USER_PATCH))
   assert.match(patched, /- id: web\n {2}config:\n {4}fetchProvider: http\n {4}searchProvider: apophiscode-api-auto\n/u)
 
-  const backend = await env.seen.handler('search/update', { searchBackend: 'gpt' })
-  assert.equal(backend.value.searchBackend, 'gpt')
-  const refused = await env.seen.handler('search/update', { searchBackend: 'bing' })
+  const backend = await env.seen.handler('search/update', { searchModel: '' })
+  assert.equal(backend.value.searchModel, '')
+  const refused = await env.seen.handler('search/update', { searchModel: 'bing' })
   assert.equal(refused.ok, false)
-  assert.match(refused.error.message, /not supported/u)
+  assert.match(refused.error.message, /absent from the active key/u)
 
   const back = await env.seen.handler('search/update', { searchProvider: 'default' })
   assert.deepEqual(back.value.applied, { state: 'removed' })
@@ -198,11 +199,11 @@ test('DSH 0.1.5: the preference lives in the installed section and its change ho
   apply(env.ctx, {})
   await settle()
   assert.equal(env.seen.section.ns, 'apophiscode-api')
-  const updated = await env.seen.handler('search/update', { searchProvider: 'apophiscode', searchBackend: 'gpt' })
+  const updated = await env.seen.handler('search/update', { searchProvider: 'apophiscode', searchModel: '' })
   assert.equal(updated.ok, true)
-  assert.deepEqual(env.seen.updates, [{ id: 'apophiscode-api', patch: { searchProvider: 'apophiscode', searchBackend: 'gpt' } }])
+  assert.deepEqual(env.seen.updates, [{ id: 'apophiscode-api', patch: { searchProvider: 'apophiscode', searchModel: '' } }])
   assert.equal(updated.value.searchProvider, 'apophiscode')
-  assert.equal(updated.value.searchBackend, 'gpt')
+  assert.equal(updated.value.searchModel, '')
   assert.match(await readFile(env.patchPath, 'utf8'), /searchProvider: apophiscode-api\n/u)
 })
 
@@ -212,12 +213,13 @@ test('the registered providers search with ring keys and route by the initiating
   apply(env.ctx, env.config)
   await settle()
   const added = await env.seen.handler('keys/add', { key: 'sk-search-key-0001', label: 'search' })
-  assert.equal(added.ok, true)
+  assert.equal(added.ok, true, JSON.stringify(added))
 
   const original = globalThis.fetch
   const requests = []
   globalThis.fetch = async (url, init) => {
-    requests.push({ url, key: new Headers(init.headers).get('x-api-key') })
+    if (new URL(url).pathname.endsWith('/v1/models')) return Response.json({ data: [{ id: 'search-any', api: 'anthropic-messages' }] })
+    requests.push({ url, key: new Headers(init.headers).get('authorization') })
     return {
       ok: true,
       status: 200,
@@ -233,7 +235,7 @@ test('the registered providers search with ring keys and route by the initiating
 
   const direct = await env.providers.get('apophiscode-api').search({ query: 'q' })
   assert.equal(direct.sources[0].url, 'https://gateway.example/')
-  assert.deepEqual(requests, [{ url: 'https://www.apophis.uk/v1/messages', key: 'sk-search-key-0001' }])
+  assert.deepEqual(requests, [{ url: 'https://www.apophis.uk/v1/messages', key: 'Bearer sk-search-key-0001' }])
 
   const auto = env.providers.get('apophiscode-api-auto')
   assert.equal((await auto.search({ query: 'q' })).sources[0].url, 'https://gateway.example/')

@@ -22,7 +22,7 @@ export const CLAUDE_TRANSPORTS = Object.freeze(['auto', 'cli', 'http'])
 export const DEFAULT_CLAUDE_TRANSPORT = 'auto'
 
 /** Whether a catalog model is served over the Anthropic Messages protocol. */
-export const isClaudeModel = modelId => typeof modelId === 'string' && modelId.startsWith('claude-')
+export const isClaudeModel = model => model?.api === 'anthropic-messages'
 
 /** Read the stored preference; anything unknown is the default. */
 export function readClaudeTransport(value) {

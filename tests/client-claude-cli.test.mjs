@@ -18,22 +18,13 @@ const KEYS = [
   { id: 'sale', label: 'sale key', addedAt: 2, active: false, disabled: false },
   { id: 'gpt', label: 'gpt key', addedAt: 3, active: false, disabled: false },
 ]
-const CLAUDE_COVERAGE = { 'claude-opus-5-5': true, 'claude-sonnet-5-5': true, 'claude-haiku-5-5': true }
-
 /** The built settings page against a channel answering the CLI endpoints from `cli`. */
-async function page(t, cli, groupsOverride) {
+async function page(t, cli) {
   let current = structuredClone(cli)
   const answers = {
     status: () => ({ activeId: 'cc', writable: true, hosts: {}, defaults: {}, keys: KEYS }),
     balance: () => ({ activeId: 'cc', fetchedAt: 1, keys: [] }),
-    groups: () => groupsOverride ?? ({
-      descriptions: {},
-      keys: [
-        { id: 'cc', groups: ['cc', 'codex'], coverage: CLAUDE_COVERAGE, claudeTransport: { transport: 'cli', reason: 'group', groups: ['cc'] } },
-        { id: 'sale', groups: ['cc-sale'], coverage: CLAUDE_COVERAGE, claudeTransport: { transport: 'http', reason: 'group', groups: ['cc-sale'] } },
-        { id: 'gpt', groups: ['codex'], coverage: { 'gpt-6.1-sol': true, 'claude-opus-5-5': false }, claudeTransport: { transport: 'http', reason: 'group', groups: [] } },
-      ],
-    }),
+    'models/status': () => ({ writable: true, models: [] }),
     'claude-cli/status': () => current,
     'claude-cli/install': () => (current = { ...current, install: { state: 'running', startedAt: 1 } }),
     'claude-cli/update': payload => (current = { ...current, transport: payload.transport }),
@@ -73,7 +64,7 @@ async function page(t, cli, groupsOverride) {
     root, calls, timers, card,
     radios: () => card().findAll(node => node.props.role === 'radio'),
     button: label => card().find(node => node.type === 'button' && text(node) === label),
-    chips: () => root.root.findAll(node => node.type === 'span' && typeof node.props.className === 'string' && node.props.className.includes('apc-chip')).map(node => [text(node), node.props.title]),
+    accounts: () => root.root.find(node => node.type === 'section' && node.findAll(child => child.type === 'h3' && text(child) === zh.accountsTitle).length === 1),
   }
 }
 
@@ -112,26 +103,21 @@ test('an unwritable profile shows the route without letting it change', async t 
   assert.ok(text(view.card()).includes(zh.cliTransportNotWritable))
 })
 
-test('each key that reaches Claude says which route its Claude requests take', async t => {
+test('account rows keep key controls without group or Claude transport details', async t => {
   const view = await page(t, INSTALLED)
-  const chips = view.chips()
-  const cli = chips.find(([label]) => label === zh.keyClaudeCli)
-  const http = chips.filter(([label]) => label === zh.keyClaudeHttp)
-  assert.ok(cli !== undefined)
-  assert.ok(cli[1].includes(zh.keyClaudeCliHint))
-  assert.doesNotMatch(cli[1], /分组 cc/u)
-  assert.equal(http.length, 1, 'a key without Claude coverage gets no route chip')
+  const content = text(view.accounts())
+  for (const key of KEYS) assert.ok(content.includes(key.label))
+  assert.ok(content.includes(zh.keyActive))
+  assert.ok(content.includes(zh.keyRemove))
+  assert.doesNotMatch(content, /分组|Claude|HTTP|CLI/u)
+  assert.equal(view.calls.some(([endpoint]) => endpoint === 'groups'), false)
 })
 
-test('missing key membership and failed directory refreshes remain visible in settings', async t => {
-  const view = await page(t, INSTALLED, {
-    keys: [{ id: 'cc', coverage: { 'claude-opus-5-5': true }, membershipUnavailable: true,
-      stale: { fetchedAt: 1, error: 'model list unavailable' }, claudeTransport: { transport: 'http', reason: 'unknown' } }],
-    directoryStale: { fetchedAt: 1, error: 'public directory HTTP 404' },
-  })
-  const content = text(view.root.root)
-  assert.ok(content.includes(zh.groupsMembershipUnavailable))
-  assert.ok(content.includes(`${zh.groupsStale}: model list unavailable`))
-  assert.ok(content.includes(`${zh.groupsDirectoryStale}: public directory HTTP 404`))
-  assert.equal(view.chips().filter(([label]) => label === zh.keyClaudeCli).length, 0)
+test('account refresh requests active models without loading group listings', async t => {
+  const view = await page(t, INSTALLED)
+  const refresh = view.accounts().find(node => node.type === 'button' && text(node) === zh.refresh)
+  await act(async () => refresh.props.onClick())
+  await settle()
+  assert.ok(view.calls.some(([endpoint, payload]) => endpoint === 'models/status' && payload.force === true))
+  assert.equal(view.calls.some(([endpoint]) => endpoint === 'groups'), false)
 })

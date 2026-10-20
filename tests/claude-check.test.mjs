@@ -1,3 +1,4 @@
+import { mockGateway } from './fixtures/declared-gateway.mjs'
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { createClaudeCheck } from '../scripts/claude-check.mjs'
@@ -9,7 +10,7 @@ const orderAnswer = JSON.stringify({ itemSubtotalCents: 44300, amountDueCents: 4
 for (const maxRetries of [0, 1]) {
   test(`native live checker retains capacity evidence with ${maxRetries} transient retries`, async t => {
     let calls = 0
-    t.mock.method(globalThis, 'fetch', async (input, init) => {
+    mockGateway(t, async (input, init) => {
       const request = new Request(input, init)
       const body = await request.json()
       if (++calls === 1) return Response.json({ error: { message: 'Too many pending requests' } }, { status: 429 })
@@ -27,7 +28,7 @@ for (const maxRetries of [0, 1]) {
 
 test('an HTTP 200 stream failure remains visible after a successful retry', async t => {
   let calls = 0
-  t.mock.method(globalThis, 'fetch', async (input, init) => {
+  mockGateway(t, async (input, init) => {
     const body = await new Request(input, init).json()
     if (++calls === 1) return new Response(`event: error\ndata: ${JSON.stringify({ type: 'error', error: { type: 'overloaded_error', message: '503 upstream overloaded' } })}\n\n`, { headers: { 'content-type': 'text/event-stream' } })
     return anthropicStream(body.model, { type: 'text', text: orderAnswer })
@@ -43,7 +44,7 @@ test('an HTTP 200 stream failure remains visible after a successful retry', asyn
 })
 
 test('a business answer with incorrect arithmetic fails even with a complete HTTP 200', async t => {
-  t.mock.method(globalThis, 'fetch', async (input, init) => {
+  mockGateway(t, async (input, init) => {
     const body = await new Request(input, init).json()
     assert.match(body.messages[0].content[0].text, /采购订单/u)
     return anthropicStream(body.model, { type: 'text', text: '{"itemSubtotalCents":44300,"amountDueCents":45500}' })
@@ -61,7 +62,7 @@ test('a business answer with incorrect arithmetic fails even with a complete HTT
 test('business inventory tools replay their lookup result and verify the shortage', async t => {
   const scenario = createBusinessScenario('tool', 0)
   const requests = []
-  t.mock.method(globalThis, 'fetch', async (input, init) => {
+  mockGateway(t, async (input, init) => {
     const body = await new Request(input, init).json()
     requests.push(body)
     return requests.length === 1
@@ -82,7 +83,7 @@ test('business inventory tools replay their lookup result and verify the shortag
 
 test('the checker keeps raw test-message 403 evidence without treating it as a key fault or retrying', async t => {
   let calls = 0
-  t.mock.method(globalThis, 'fetch', async () => {
+  mockGateway(t, async () => {
     calls++
     return Response.json({ error: { type: 'gateway_unknown_error', message: 'Your client is already connected and authorized. There is no need to send test messages to verify the connection.' } }, { status: 403 })
   })
@@ -99,7 +100,7 @@ test('the checker keeps raw test-message 403 evidence without treating it as a k
 for (const recovers of [true, false]) {
   test(`Haiku inventory continuation surfaces the first policy refusal even if the next response ${recovers ? 'would recover' : 'would refuse again'}`, async t => {
     const bodies = []
-    t.mock.method(globalThis, 'fetch', async (input, init) => {
+    mockGateway(t, async (input, init) => {
       const request = new Request(input, init)
       const body = await request.text()
       bodies.push(body)

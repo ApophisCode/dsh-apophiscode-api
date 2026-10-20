@@ -46,7 +46,7 @@ The plugin keeps its own configuration and credentials and can coexist with othe
 | **Streaming and tools** | Streaming output, reasoning controls and DSH tool integration, with permissions and conversation history managed by DSH. |
 | **Multiple API keys** | Add, rename, select, disable and delete keys, with key rotation and status indicators. |
 | **Balance and model coverage** | Read service balances or quotas, public group descriptions and the selected key's accessible model list. |
-| **Web search** | DeepSeek / GPT search backends that require structured search results. |
+| **Web search** | Exact models from the active conversation key, using a verified protocol and requiring structured results. |
 | **Image generation and editing** | Separate image keys, model selection and generation/editing tool entry points. |
 
 Implementation coverage and live availability are tracked separately. Settings,
@@ -62,7 +62,7 @@ Have a working DSH installation and a conversation API key from [Apophis](https:
 Open **Settings → Plugins → Add Plugin** and enter this in the package name/address field:
 
 ```text
-dsh-apophiscode-api@0.1.6
+dsh-apophiscode-api@0.1.7
 ```
 
 Install it and confirm that **ApophisCode** is enabled. This requests the exact npm version.
@@ -97,7 +97,7 @@ Image tools require a separate image key and image model; their verification sco
 ## Updating the plugin
 
 To upgrade from 0.1.4 or 0.1.5, first use DSH's **Settings → Plugins → Add Plugin**
-and install `dsh-apophiscode-api@0.1.6`. The updater inside those older versions may fail to start the installer.
+and install `dsh-apophiscode-api@0.1.7`. The updater inside those older versions may fail to start the installer.
 
 For an npm installation:
 
@@ -129,12 +129,54 @@ models, channel groups and prices currently listed by Apophis.
 Choose a model from the **ApophisCode** group in a DSH conversation. The displayed
 models come from the conversation key currently in use. Adjust their visibility
 under **Settings → ApophisCode → Visible models**.
+Accounts and keys manages keys and balances; model lists live in Visible models.
 
-Whether a model can be called depends on key permissions, the plugin's support
-for that model and service status. Image generation and editing use a separate
-image key and model settings; see the [validation record](https://github.com/ApophisCode/dsh-apophiscode-api/blob/main/docs/validation.md) for verified results.
+The catalog preserves the active key’s raw `/v1/models` IDs in response order,
+with display names equal to IDs. Changing keys replaces the catalog. There is
+no built-in model list, alias rewrite, cross-key union or title-model substitute.
+Search models use the conversation key’s directory; image models use the separate image key’s directory.
+
+DeepSeek-family conversations use `/v1/responses` under this plugin's explicit
+Apophis transport policy, ahead of gateway and SDK protocol references. Raw IDs
+are preserved without model rewrites or per-model protocol tables.
+Other families use structured gateway protocol declarations when present.
+An exact SDK protocol reference is used when the gateway omits its declaration.
+If no policy or source provides a protocol, the plugin sends an independent short
+text check before the first call. This may consume a small amount of quota and
+never includes your conversation or tools. Successful protocol evidence is
+isolated by target, key and exact ID, and cached for ten minutes. Only an explicit
+protocol refusal advances to another protocol. Authentication, quota, timeout,
+network and ambiguous failures stop verification. Failed business requests are
+never resent using another protocol.
+
+Reasoning efforts prefer gateway declarations. When absent, the installed SDK's
+metadata supplements efforts by exact model ID, without prefix guesses or a
+shared effort list for all models. SDK metadata changes with the dependency
+version and does not prove current-key gateway authorization. Unmatched models
+remain visible with unknown efforts. If the native catalog has no exact ID,
+other SDK catalogs supplement only consistent supported-protocol and effort
+declarations. Conflicting fields stay unknown; foreign service endpoints, auth
+and compatibility settings are never imported. Default does not force an effort; explicit
+choices use the corresponding SDK protocol encoder and retain gateway failures.
+The DeepSeek policy or an exact SDK protocol reference permits direct invocation
+without an extra probe; neither guarantees gateway acceptance. Independent probes
+are reserved for models without a policy, gateway or exact SDK protocol declaration.
+Undeclared context limits and image input remain unknown; SDK limits are not
+advertised as gateway capacities.
+A text check does not establish
+image, search, tool or optional-parameter support. Actual availability depends on
+key permissions and service status. See the [validation record](https://github.com/ApophisCode/dsh-apophiscode-api/blob/main/docs/validation.md) for the evidence and its limits.
 
 ## Troubleshooting
+
+### Key switching and balance updates
+
+“Use this key” automatically reloads the active key’s model directory, clears
+the previous list while loading, and reports discovery failures in the model
+card. Balances load independently and do not disable key actions; the refresh
+button stays busy to prevent duplicate reads. Failed updates retain any previous balance
+with its last-success time; that amount is not a current reading.
+An unreadable balance response alone does not establish model-call availability.
 
 ### Installation or updating reports a release cooldown
 
@@ -182,7 +224,7 @@ pnpm install --frozen-lockfile
 pnpm run check
 ```
 
-After `check` passes, install `.artifacts/dsh-apophiscode-api-0.1.6.tgz` using the local-file method above.
+After `check` passes, install `.artifacts/dsh-apophiscode-api-0.1.7.tgz` using the local-file method above.
 
 | Command | Purpose |
 | --- | --- |

@@ -19,7 +19,7 @@ const GPT = ['gpt-6-astra', 'gpt-6.1-sol', 'gpt-future-unknown']
 const TEST_KEYS = { deepseek: 'sk-offline-model-refresh-deepseek', gpt: 'sk-offline-model-refresh-gpt' }
 
 /** Built settings UI -> registered RPC -> isolated records and real DSH model registry. */
-async function settingsFixture(t, { initialKeys = Object.keys(TEST_KEYS), beforeCall, beforeReply, directoryEntries } = {}) {
+async function settingsFixture(t, { initialKeys = Object.keys(TEST_KEYS), beforeCall, beforeReply, directoryEntries, usageReply } = {}) {
   const records = new Map(), calls = [], slots = new Map(), disposers = []
   const runtimeContext = new Context()
   const llm = new LlmRuntime(runtimeContext)
@@ -75,7 +75,7 @@ async function settingsFixture(t, { initialKeys = Object.keys(TEST_KEYS), before
       return Response.json({ data: ids.map(id => ({ id })) })
     }
     if (path === '/api/v1/model-plaza') return Response.json({ code: 0, data: { groups: [] } })
-    if (path === '/v1/usage') return Response.json({ remaining: 10, unit: 'USD' })
+    if (path === '/v1/usage') return usageReply?.(request) ?? Response.json({ remaining: 10, unit: 'USD' })
     assert.fail(`unexpected fixture request: ${path}`)
   })
   apply(ctx, { claudeTransport: 'http', claudeCliPath: '/nonexistent/apophiscode-test-cli' })
@@ -145,6 +145,86 @@ test('selecting the GPT key replaces the open DeepSeek model list and the DSH di
   assert.deepEqual(fx.modelIds(), GPT, 'the mounted settings card must replace DeepSeek with the active GPT key IDs')
   await fx.select('deepseek')
   assert.deepEqual(fx.modelIds(), DEEPSEEK)
+})
+
+test('repeated key switches preserve valid React identities and exactly one current model card', async t => {
+  const errors = []
+  t.mock.method(console, 'error', (...args) => errors.push(args.join(' ')))
+  const fx = await settingsFixture(t)
+  for (const [label, ids] of [['gpt', GPT], ['deepseek', DEEPSEEK], ['gpt', GPT]]) {
+    await fx.select(label)
+    assert.deepEqual(fx.modelIds(), ids)
+  }
+  assert.deepEqual(errors, [], 'React must be able to remove the old card without duplicate sibling identities')
+})
+
+test('an initial balance RPC failure cannot hide stored keys or prevent switching models', async t => {
+  const fx = await settingsFixture(t, { beforeReply(endpoint) {
+    if (endpoint === 'balance') throw new Error('offline balance failure')
+  } })
+  assert.ok(fx.row('gpt'), 'credential status must render independently of balance reads')
+  await fx.select('gpt')
+  assert.deepEqual(fx.modelIds(), GPT)
+  assert.match(text(fx.card(zh.accountsTitle)), /余额暂时无法更新/u)
+})
+
+test('a pending balance read cannot delay the new model list after a key switch', async t => {
+  let release, hold = false
+  const pending = new Promise(resolve => { release = resolve })
+  const fx = await settingsFixture(t, { beforeCall(endpoint) {
+    if (endpoint === 'balance' && hold) return pending
+  } })
+  hold = true
+  let selection
+  try {
+    await act(async () => { selection = fx.button(fx.row('gpt'), zh.keyUse).props.onClick() })
+    await settle()
+    assert.deepEqual(fx.modelIds(), GPT, 'do not wait for ancillary balances to load the selected key models')
+    assert.equal(fx.button(fx.row('deepseek'), zh.keyUse).props.disabled, false, 'a pending balance must not lock the next key switch')
+  } finally {
+    await act(async () => { release(); await selection })
+  }
+})
+
+test('initial pending balances leave key switching usable and late balance replies cannot undo it', async t => {
+  let release
+  const pending = new Promise(resolve => { release = resolve })
+  const fx = await settingsFixture(t, { beforeReply(endpoint) {
+    if (endpoint === 'balance') return pending
+  } })
+  let selection
+  let selectionDone = false
+  try {
+    assert.equal(fx.button(fx.row('gpt'), zh.keyUse).props.disabled, false)
+    assert.equal(fx.button(fx.card(zh.accountsTitle), zh.refreshing).props.disabled, true)
+    await act(async () => {
+      selection = fx.button(fx.row('gpt'), zh.keyUse).props.onClick().then(() => { selectionDone = true })
+    })
+    await settle()
+    assert.equal(selectionDone, true, 'a saved credential action completes independently of its balance read')
+    assert.deepEqual(fx.modelIds(), GPT)
+    assert.equal(fx.button(fx.row('deepseek'), zh.keyUse).props.disabled, false)
+  } finally {
+    await act(async () => { release(); await selection })
+  }
+  await settle()
+  assert.deepEqual(fx.modelIds(), GPT)
+  assert.equal(fx.button(fx.card(zh.accountsTitle), zh.refresh).props.disabled, false)
+})
+
+test('invalid balance JSON retains a clearly dated balance while switching models automatically', async t => {
+  let malformed = false
+  const fx = await settingsFixture(t, { usageReply() {
+    return malformed ? new Response('<html>unavailable</html>') : undefined
+  } })
+  malformed = true
+  await fx.select('gpt')
+  assert.deepEqual(fx.modelIds(), GPT)
+  const content = text(fx.row('gpt'))
+  assert.match(content, /余额暂时无法更新/u)
+  assert.match(content, /上次成功读取于/u)
+  assert.match(content, /余额接口返回的数据无法解析/u)
+  assert.doesNotMatch(content, /unreadable balance data/u)
 })
 
 test('disabling, re-enabling and removing active keys refreshes the model card through the empty ring', async t => {

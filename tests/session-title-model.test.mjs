@@ -4,7 +4,7 @@ import test from 'node:test'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 
 import { ApophisCodeKeyRing } from '../src/key-ring.js'
-import { createRouteAdapter } from '../src/route.js'
+import { createRouteAdapter } from './fixtures/declared-gateway.mjs'
 import { fakeCredentials } from './helpers.mjs'
 
 const KEY = 'sk-fixture-only-not-a-real-key'
@@ -36,7 +36,7 @@ async function drain(stream) {
   return finish
 }
 
-test('a GPT session title runs on GPT-6.1 Sol, which every GPT key group serves', async t => {
+test('session titles preserve the exact selected model without a substitute', async t => {
   const models = []
   t.mock.method(globalThis, 'fetch', async (input, init) => {
     models.push(JSON.parse(await new Request(input, init).text()).model)
@@ -51,7 +51,7 @@ test('a GPT session title runs on GPT-6.1 Sol, which every GPT key group serves'
   for (const model of ['gpt-6-astra', 'gpt-5.6-sol']) {
     const prepared = await adapter.prepareCall('apophiscode', model)
     assert.equal((await drain(prepared.stream({ ...request(model), purpose: 'session-title' }))).kind, 'stop')
-    assert.equal(models.at(-1), 'gpt-6.1-sol', model)
+    assert.equal(models.at(-1), model)
     // The conversation itself stays on the chosen model.
     assert.equal((await drain(prepared.stream(request(model)))).kind, 'stop')
     assert.equal(models.at(-1), model)

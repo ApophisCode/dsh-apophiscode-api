@@ -112,9 +112,14 @@ export function createApophisCodeRpc({ ring, balance, groups, hosts, preference,
     'search/status': () => webSearch().status(),
     'search/update': payload => webSearch().update({
       searchProvider: payload?.searchProvider,
-      searchBackend: payload?.searchBackend,
+      searchModel: payload?.searchModel,
     }),
-    'models/status': () => models().status(),
+    'models/status': async payload => {
+      const force = payload?.force === true
+      if (force) groups?.invalidate()
+      try { return await models().status() }
+      finally { if (force) modelSelection?.refresh?.() }
+    },
     'models/update': payload => models().update({ selectedIds: payload?.selectedIds }),
     'images/status': () => imageSupport().status(),
     'images/balance': (payload, signal) => imageSupport().readBalance({ force: payload?.force === true, signal }),

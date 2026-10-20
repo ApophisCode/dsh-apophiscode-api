@@ -1,3 +1,4 @@
+import { MODEL_ROWS } from './fixtures/declared-gateway.mjs'
 import assert from 'node:assert/strict'
 import { createServer } from 'node:http'
 import test from 'node:test'
@@ -11,7 +12,10 @@ const { apply } = await import(process.env.APOPHIS_TEST_ENTRY
   ? pathToFileURL(process.env.APOPHIS_TEST_ENTRY).href : '../lib/index.js')
 
 async function server(t, handler) {
-  const instance = createServer(handler)
+  const instance = createServer((request, response) => {
+    if (request.url === '/v1/models') { response.setHeader('content-type', 'application/json'); response.end(JSON.stringify({ data: MODEL_ROWS })); return }
+    handler(request, response)
+  })
   await new Promise(resolve => instance.listen(0, '127.0.0.1', resolve))
   t.after(() => new Promise(resolve => { instance.closeAllConnections(); instance.close(resolve) }))
   return `http://127.0.0.1:${instance.address().port}`

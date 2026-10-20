@@ -1,0 +1,254 @@
+{
+  "note": "Offline historical wire fixtures only. Never imported by production; no live capability claim.",
+  "defaultIds": [
+    "deepseek-v4-flash",
+    "deepseek-v4-pro",
+    "deepseek-v4.1-flash",
+    "gpt-6.1-sol",
+    "gpt-6-astra",
+    "gpt-5.6-sol",
+    "claude-opus-5-5",
+    "claude-sonnet-5-5"
+  ],
+  "rows": [
+    {
+      "id": "deepseek-v4-flash",
+      "api": "openai-responses",
+      "context_window": 1000000,
+      "max_output_tokens": 384000,
+      "input_modalities": [
+        "text"
+      ],
+      "reasoning_efforts": [
+        "off",
+        "low",
+        "high",
+        "max"
+      ]
+    },
+    {
+      "id": "deepseek-v4-pro",
+      "api": "openai-responses",
+      "context_window": 1000000,
+      "max_output_tokens": 384000,
+      "input_modalities": [
+        "text"
+      ],
+      "reasoning_efforts": [
+        "high",
+        "max"
+      ]
+    },
+    {
+      "id": "deepseek-v4.1-flash",
+      "api": "openai-responses",
+      "context_window": 1000000,
+      "max_output_tokens": 384000,
+      "input_modalities": [
+        "text",
+        "image"
+      ],
+      "reasoning_efforts": [
+        "off",
+        "low",
+        "high",
+        "max"
+      ]
+    },
+    {
+      "id": "gpt-6.1-sol",
+      "api": "openai-responses",
+      "context_window": 1050000,
+      "max_output_tokens": 128000,
+      "input_modalities": [
+        "text",
+        "image"
+      ],
+      "reasoning_efforts": [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
+      ]
+    },
+    {
+      "id": "gpt-6-astra",
+      "api": "openai-responses",
+      "context_window": 1050000,
+      "max_output_tokens": 128000,
+      "input_modalities": [
+        "text",
+        "image"
+      ],
+      "reasoning_efforts": [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
+      ]
+    },
+    {
+      "id": "gpt-5.6-sol",
+      "api": "openai-responses",
+      "context_window": 1050000,
+      "max_output_tokens": 128000,
+      "input_modalities": [
+        "text",
+        "image"
+      ],
+      "reasoning_efforts": [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
+      ]
+    },
+    {
+      "id": "grok-4.7",
+      "api": "openai-responses",
+      "context_window": 500000,
+      "max_output_tokens": 500000,
+      "input_modalities": [
+        "text",
+        "image"
+      ],
+      "reasoning_efforts": [
+        "low",
+        "medium",
+        "high",
+        "xhigh"
+      ]
+    },
+    {
+      "id": "gemini-4-argon",
+      "api": "google-generative-ai",
+      "context_window": 1048576,
+      "max_output_tokens": 65536,
+      "input_modalities": [
+        "text",
+        "image"
+      ],
+      "reasoning_efforts": [
+        "low",
+        "medium",
+        "high"
+      ]
+    },
+    {
+      "id": "gemini-3.8-flash",
+      "api": "google-generative-ai",
+      "context_window": 1048576,
+      "max_output_tokens": 65536,
+      "input_modalities": [
+        "text",
+        "image"
+      ],
+      "reasoning_efforts": [
+        "low",
+        "medium",
+        "high"
+      ]
+    },
+    {
+      "id": "claude-opus-5-5",
+      "api": "anthropic-messages",
+      "context_window": 1000000,
+      "max_output_tokens": 128000,
+      "input_modalities": [
+        "text",
+        "image"
+      ],
+      "reasoning_efforts": [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
+      ]
+    },
+    {
+      "id": "claude-sonnet-5-5",
+      "api": "anthropic-messages",
+      "context_window": 1000000,
+      "max_output_tokens": 128000,
+      "input_modalities": [
+        "text",
+        "image"
+      ],
+      "reasoning_efforts": [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
+      ]
+    },
+    {
+      "id": "claude-haiku-5-5",
+      "api": "anthropic-messages",
+      "context_window": 1000000,
+      "max_output_tokens": 128000,
+      "input_modalities": [
+        "text",
+        "image"
+      ],
+      "reasoning_efforts": [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
+      ]
+    },
+    {
+      "id": "deepseek-flash",
+      "api": "openai-responses",
+      "context_window": 1000000,
+      "max_output_tokens": 384000,
+      "input_modalities": [
+        "text",
+        "image"
+      ],
+      "reasoning_efforts": [
+        "off",
+        "low",
+        "high",
+        "max"
+      ]
+    },
+    {
+      "id": "deepseek-v4-flash-0731",
+      "api": "openai-responses",
+      "context_window": 1000000,
+      "max_output_tokens": 384000,
+      "input_modalities": [
+        "text"
+      ],
+      "reasoning_efforts": [
+        "off",
+        "low",
+        "high",
+        "max"
+      ]
+    },
+    {
+      "id": "deepseek-v4.1-flash-expires-on-0910",
+      "api": "openai-responses",
+      "context_window": 1000000,
+      "max_output_tokens": 384000,
+      "input_modalities": [
+        "text",
+        "image"
+      ],
+      "reasoning_efforts": [
+        "off",
+        "low",
+        "high",
+        "max"
+      ]
+    }
+  ]
+}

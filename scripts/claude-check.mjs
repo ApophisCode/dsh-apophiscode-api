@@ -1,8 +1,7 @@
 #!/usr/bin/env node
 /**
  * Built Claude route checks with fixtures; no DSH changes. `--transport cli`
- * sends every request through this device's Claude Code CLI, as a cc key
- * does inside DSH, with an isolated CLI home.
+ * uses an already installed CLI only when explicitly requested. HTTP is the default.
  */
 import { randomUUID } from 'node:crypto'
 import { pathToFileURL } from 'node:url'
@@ -14,7 +13,7 @@ import { readStoredKey } from './stored-key.mjs'
 import { createVisionFixture } from './vision-fixture.mjs'
 import { CLAUDE_SCENARIO_VERSION, createBusinessScenario, matchesBusinessAnswer, matchesPlan, PLAN_POLICY } from './claude-scenarios.mjs'
 
-export const CLAUDE_MODELS = Object.freeze(['claude-opus-5-5', 'claude-sonnet-5-5', 'claude-haiku-5-5'])
+import { exactModel, gatewayDirectory } from './gateway-directory.mjs'
 export const CLAUDE_CHECK_KINDS = Object.freeze(['text', 'tool', 'image', 'title', 'plan'])
 const BASE_SYSTEM = 'You are an assistant inside DeepSeek Harness. Follow the user request using only the supplied DSH tools.'
 
@@ -52,7 +51,8 @@ export async function createClaudeCheck({ key, sessionId = randomUUID(), timeout
       } },
     }
   }
-  const adapter = createRouteAdapter({ ring, fallbackSessionId: sessionId, resolveAttachments: () => fixture.attachments,
+  const groups = gatewayDirectory(ring)
+  const adapter = createRouteAdapter({ ring, availableModels: groups.availableModels, fallbackSessionId: sessionId, resolveAttachments: () => fixture.attachments,
     keys: { active: () => ring.activeKey(), forRequest: (_model, chosen) => chosen, onKeyFailure: kind => failures.push(kind) },
     ...(cli === undefined ? {} : { claudeCli: cli.selector }),
   })
@@ -60,7 +60,11 @@ export async function createClaudeCheck({ key, sessionId = randomUUID(), timeout
   const observedFetch = async (input, init) => {
     const request = new Request(input, init)
     const url = new URL(request.url)
-    if (url.origin !== 'https://www.apophis.uk' || url.pathname !== '/v1/messages') throw new Error('Unexpected Claude check target')
+    if (url.origin !== 'https://www.apophis.uk') throw new Error('Unexpected check target')
+    if (request.method === 'GET' && url.pathname === '/v1/models') return original(request)
+    const candidate = await request.clone().json()
+    if (candidate.stream !== true) return original(request)
+    if (url.pathname !== '/v1/messages') throw new Error('This diagnostic requires a gateway-declared Messages protocol')
     const payload = await request.clone().json()
     const observed = { model: payload.model, effort: payload.output_config?.effort, tools: (payload.tools ?? []).map(tool => tool.name) }
     requests.push(observed)
@@ -110,8 +114,9 @@ export async function createClaudeCheck({ key, sessionId = randomUUID(), timeout
   }
 
   return {
-    async run({ model, kind = 'text', effort = 'low', signal, variant = 0 } = {}) {
-      if (!CLAUDE_MODELS.includes(model) || !CLAUDE_CHECK_KINDS.includes(kind)) throw new Error('Unsupported Claude check')
+    async run({ model, kind = 'text', effort, signal, variant = 0 } = {}) {
+      exactModel(model)
+      if (!CLAUDE_CHECK_KINDS.includes(kind)) throw new Error('Unsupported Claude check')
       const started = Date.now()
       const firstRequest = requests.length
       let answer
@@ -160,7 +165,7 @@ export async function createClaudeCheck({ key, sessionId = randomUUID(), timeout
         if (result.finish?.kind !== 'stop') throw new Error(`Unexpected finish: ${result.finish?.kind}`)
         if (!matchesBusinessAnswer(scenario, answer)) throw new Error('The business answer did not match the supplied records')
         if (kind === 'title') {
-          if (requests.at(-1).model !== 'claude-haiku-5-5') throw new Error('Claude title did not use Haiku')
+          if (requests.at(-1).model !== model) throw new Error('Title changed the selected exact model')
         }
         const observed = requests.slice(firstRequest)
         return { ...identity, ok: true, recovered: observed.some(request => request.status >= 400 || request.error !== undefined || request.streamError !== undefined), answer: scrub(answer), toolCalls, durationMs: Date.now() - started, requests: observed, ...(cli === undefined ? {} : { cli: cli.sender.stats() }) }
@@ -181,18 +186,17 @@ export async function createClaudeCheck({ key, sessionId = randomUUID(), timeout
 async function main() {
   const args = process.argv.slice(2)
   const option = (name, fallback) => args.includes(name) ? args[args.indexOf(name) + 1] : fallback
-  const selected = option('--model', undefined)
+  const selected = exactModel(option('--model', undefined))
   const kind = option('--kind', undefined)
-  if (selected !== undefined && !CLAUDE_MODELS.includes(selected)) throw new Error('Unknown Claude model')
   if (kind !== undefined && !CLAUDE_CHECK_KINDS.includes(kind)) throw new Error('Unknown Claude check kind')
   const transport = option('--transport', 'http')
   const key = await readStoredKey({ label: option('--key-label', undefined) })
   const check = await createClaudeCheck({ key, transport, maxRetries: Number(option('--retry-transient', 0)) })
   try {
-    console.log(`stored key: …${key.slice(-4)} · transport: ${transport}${check.cliVersion === undefined ? '' : ` (Claude Code ${check.cliVersion})`}`)
-    for (const model of selected === undefined ? CLAUDE_MODELS : [selected]) {
+    console.log(`plugin-owned stored key · transport: ${transport}${check.cliVersion === undefined ? '' : ` (Claude Code ${check.cliVersion})`}`)
+    for (const model of [selected]) {
       for (const current of kind === undefined ? CLAUDE_CHECK_KINDS : [kind]) {
-        const outcome = await check.run({ model, kind: current, effort: option('--effort', 'low') })
+        const outcome = await check.run({ model, kind: current, effort: option('--effort', undefined) })
         console.log(JSON.stringify(outcome))
         if (!outcome.ok) process.exitCode = 1
       }

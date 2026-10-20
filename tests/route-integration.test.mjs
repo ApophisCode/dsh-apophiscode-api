@@ -3,11 +3,13 @@ import test from 'node:test'
 
 import { PiAiAdapter } from '@deepseek-ai/dsh-llm-pi-ai'
 
-import { createApophisCodeCatalog, APOPHISCODE_MODEL_IDS } from '../src/catalog.js'
-import { DEFAULT_REASONING_LEVEL, DISPLAY_NAME, PROVIDER } from '../src/constants.js'
-import { createApophisCodeProfile, createRouteAdapter } from '../src/index.js'
+import { createApophisCodeCatalog, APOPHISCODE_MODEL_IDS } from './fixtures/declared-gateway.mjs'
+import { DISPLAY_NAME, PROVIDER } from '../src/constants.js'
+import { createApophisCodeProfile } from '../src/index.js'
+import { createRouteAdapter } from './fixtures/declared-gateway.mjs'
+const DEFAULT_REASONING_LEVEL = undefined
 import { ApophisCodeKeyRing } from '../src/key-ring.js'
-import { createApophisCodeProvider } from '../src/provider.js'
+import { createApophisCodeProvider } from './fixtures/declared-gateway.mjs'
 import { fakeCredentials } from './helpers.mjs'
 
 /**
@@ -56,10 +58,10 @@ test('without a usable key the route lists no models instead of failing, where D
   const listsOnlyWithKey = probe.reads.length > 0
   const ring = new ApophisCodeKeyRing(fakeCredentials())
   const adapter = createRouteAdapter({ ring, keys: { active: () => ring.activeKey(), forRequest: (_model, key) => key, onKeyFailure() {} } })
-  const expected = listsOnlyWithKey ? [] : [...APOPHISCODE_MODEL_IDS]
+  const expected = []
   assert.deepEqual((await adapter.listModels(PROVIDER)).map(model => model.id), expected, 'no key stored')
   const { keys: [stored] } = await ring.add('sk-listing-fixture-not-a-real-key', 'fixture')
-  assert.deepEqual((await adapter.listModels(PROVIDER)).map(model => model.id), [...APOPHISCODE_MODEL_IDS])
+  assert.deepEqual((await adapter.listModels(PROVIDER)).map(model => model.id), createApophisCodeCatalog(undefined, { includeLegacy: true }).map(model => model.id))
   await ring.disable(stored.id, 'quota')
   assert.deepEqual((await adapter.listModels(PROVIDER)).map(model => model.id), expected, 'every key moved aside')
 })

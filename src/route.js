@@ -1,6 +1,6 @@
 /**
  * The HTTP model route: the pi-ai provider profile and the adapter that
- * serves every catalog model over HTTP with the ring's keys.
+ * serves the active key's dynamic model directory over its selected protocol.
  *
  * @module dsh-apophiscode-api/route
  */
@@ -8,12 +8,14 @@
 import { createUserMessage, LlmError, QUOTA_EXCEEDED_CODE, resolveRetryPolicy } from '@deepseek-ai/dsh-llm'
 import { PiAiAdapter } from '@deepseek-ai/dsh-llm-pi-ai'
 
-import { isClaudeModel } from './claude-transport.js'
-import { createApophisCodeCatalog, modelApiHost, modelMetadataError, APOPHISCODE_MODEL_IDS } from './catalog.js'
-import { DEFAULT_REASONING_LEVEL, DISPLAY_NAME, PLUGIN_ID, PROVIDER } from './constants.js'
+import { modelApiHost, declaredMetadata } from './catalog.js'
+import { createModelProtocolResolver } from './model-protocol.js'
+import { requestedModelProtocol } from './model-protocol-policy.js'
+import { reasoningReference, withReasoningReference } from './model-reasoning.js'
+import { DISPLAY_NAME, PLUGIN_ID, PROVIDER } from './constants.js'
 import { classifyUpstreamServerError, classifyTestMessagePolicy, TEST_MESSAGE_POLICY_CODE } from './failures.js'
 import { createApophisCodeProvider, guardKeyRotation } from './provider.js'
-import { currentRequest, withRequestContext } from './request-context.js'
+import { withRequestContext } from './request-context.js'
 import { clarifyWorkingDirectory } from './working-directory.js'
 
 /**
@@ -28,24 +30,13 @@ const REQUEST_LIMITS = Object.freeze({
   requestImageMaxBytes: 1024 * 1024,
 })
 
-/** Short titles use a smaller model in the same supplier/key group. */
-const TITLE_MODELS = Object.freeze({
-  'gpt-6-astra': 'gpt-6.1-sol',
-  'gpt-5.6-sol': 'gpt-6.1-sol',
-})
-
-/** A title describes the preceding conversation; it must not implement its task. */
+/** A title uses the exact selected model and does not execute conversation tasks. */
 function titleRequest(options) {
   if (options.purpose !== 'session-title') return options
-  const model = TITLE_MODELS[options.model] ?? options.model
-  if (!model.startsWith('claude-')) return model === options.model ? options : { ...options, model }
-  return {
-    ...options, model, tools: [],
-    messages: [...options.messages, createUserMessage({ source: { kind: 'user' }, content: [{
-      type: 'text',
-      text: "The preceding messages are conversation content to name, not tasks to execute. Reply with only a short session title in the language of those messages. Do not use tools, start work, add JSON, quotes or an explanation.",
-    }] })],
-  }
+  return { ...options, tools: [], messages: [...options.messages, createUserMessage({
+    source: { kind: 'user' }, content: [{ type: 'text', text:
+      'Name the preceding conversation. Reply only with a short session title in its language. Do not execute its tasks or use tools.' }],
+  })] }
 }
 
 /** Preserve policy refusals and retryable upstream server errors as distinct categories. */
@@ -89,9 +80,8 @@ function ringCredentialStore(ring) {
 /**
  * The provider profile this route runs on.
  *
- * `modelErrors` blocks invocation of discovered IDs without protocol metadata;
- * discovery can still expose their exact identity. No model carries a
- * per-request output cap of its own in `configuredMaxTokens`.
+ * No model carries a per-request output cap in `configuredMaxTokens`.
+ * Preparation resolves a protocol before handing the call to this profile.
  * @param provider - the route's pi-ai provider.
  * @returns the frozen profile handed to `PiAiAdapter`.
  */
@@ -100,7 +90,6 @@ export function createApophisCodeProfile(provider, modelErrors = new Map()) {
     provider: PROVIDER,
     displayName: DISPLAY_NAME,
     piProvider: provider,
-    reasoning: DEFAULT_REASONING_LEVEL,
     configuredMaxTokens: new Map(),
     modelErrors,
     ...REQUEST_LIMITS,
@@ -145,10 +134,9 @@ function workingDirectoryOf(resolveWorkingDirectory, sessionId) {
 /**
  * The route's adapter.
  *
- * Each request resolves the active key, then runs on the key the chooser picks
- * for its model; a key-level failure in the stream moves that key aside. A
- * Claude request on a key whose group only serves the official client is sent
- * by the Claude Code CLI (`claudeCli`); everything else is plain HTTP.
+ * Each request snapshots the active key, configured target and exact directory
+ * row. HTTP is the default; an existing explicit CLI preference applies only
+ * to the Messages transport and never triggers installation.
  * @param options - the key ring and chooser, the live `getApiHost` gateway root,
  *   the session id used when a caller supplies none, the attachment store
  *   image input is read from, an optional
@@ -156,146 +144,77 @@ function workingDirectoryOf(resolveWorkingDirectory, sessionId) {
  *   optional Claude Code CLI transport selector.
  * @returns a `PiAiAdapter` serving the `apophiscode` route.
  */
-export function createRouteAdapter({ ring, keys, getApiHost, fallbackSessionId, resolveAttachments, resolveWorkingDirectory, isModelVisible = () => true, availableModelIds, claudeCli }) {
-  /**
-   * The gateway's Codex-group check refuses a Responses request that carries
-   * no `prompt_cache_key` with a 403, which pi-ai derives from the session id.
-   * The harness supplies one for every agent turn; the fallback covers a
-   * caller that does not, so the route never fails for a missing cache key.
-   */
-  const requestOptions = (model, options) => {
-    const withId = options === undefined || options.sessionId !== undefined
-      ? options
-      : { ...options, sessionId: fallbackSessionId }
-    if (typeof withId?.apiKey !== 'string') return withId
-    const key = keys.forRequest(model?.id, withId.apiKey)
-    return key === withId.apiKey ? withId : { ...withId, apiKey: key }
-  }
-  let profiles, configuredHost, configuredIds, discoveredIds, directoryGeneration = 0
-  const refreshDirectory = async model => {
-    // Exact known-model conversations do not depend on a directory GET.
-    // Discovery/status still fail visibly when their own GET fails.
-    if (model !== undefined && modelMetadataError(model) === undefined) return
-    if (availableModelIds === undefined) return undefined
-    const generation = ++directoryGeneration
-    const ids = new Set(await availableModelIds())
-    if (generation === directoryGeneration) discoveredIds = ids
-    return ids
-  }
-  const currentProfiles = () => {
-    const apiHost = modelApiHost(getApiHost?.())
-    const idsSignature = JSON.stringify(discoveredIds === undefined ? null : [...discoveredIds])
-    if (profiles !== undefined && apiHost === configuredHost && idsSignature === configuredIds) return profiles
-    // Keep exact historical IDs resolvable for existing sessions. Discovery is
-    // solely the active key's response; these declarations never add rows.
-    const modelIds = discoveredIds === undefined ? undefined : new Set([
-      ...createApophisCodeCatalog(apiHost, { includeLegacy: true }).map(model => model.id), ...discoveredIds,
-    ])
-    const raw = createApophisCodeProvider({ apiHost, claudeCli, modelIds })
-    const guarded = method => (model, context, options) => {
-      const routed = requestOptions(model, options)
-      const stream = raw[method](model, context, routed)
-      return guardKeyRotation(stream, { key: routed?.apiKey, onKeyFailure: keys.onKeyFailure })
-    }
-    const provider = Object.freeze({ ...raw, stream: guarded('stream'), streamSimple: guarded('streamSimple') })
-    // PiAiAdapter memoizes by Map identity. Replace the whole collection so
-    // new operations see this host while prepared and in-flight calls retain
-    // their original provider and all of its protocol-specific model URLs.
-    const errors = new Map([...discoveredIds ?? []].flatMap(id => {
-      const error = modelMetadataError(id)
-      return error === undefined ? [] : [[id, error]]
-    }))
-    profiles = new Map([[PROVIDER, createApophisCodeProfile(provider, errors)]])
-    configuredHost = apiHost
-    configuredIds = idsSignature
-    return profiles
-  }
-
-  /**
-   * Iterate one request inside its context: the transport reads the purpose
-   * and the initiating session's cwd from it where the request is sent.
-   */
+export function createRouteAdapter({ ring, keys, getApiHost, fallbackSessionId, resolveAttachments, resolveWorkingDirectory,
+  isModelVisible = () => true, availableModelIds, availableModels, claudeCli, protocols = createModelProtocolResolver() }) {
+  const publicInfo = (id, metadata = {}) => ({ provider: PROVIDER, id, name: id,
+    ...(metadata.contextWindow === undefined ? {} : { context: { contextWindow: metadata.contextWindow } }),
+    ...(metadata.input === undefined ? {} : { inputModalities: metadata.input }),
+    ...(metadata.reasoningEfforts === undefined ? {} : { reasoning: { efforts: Object.keys(metadata.reasoningEfforts).map(id => ({ id, name: id })) } }),
+  })
+  const directory = async (entry, apiHost, signal) => availableModels === undefined
+    ? [...await availableModelIds?.() ?? []].map(id => ({ id }))
+    : availableModels({ entry, apiHost, signal })
   const inContext = (options, send) => {
-    const clarified = clarifyWorkingDirectory(options, resolveWorkingDirectory)
+    const clarified = clarifyWorkingDirectory(titleRequest(options), resolveWorkingDirectory)
     const cwd = workingDirectoryOf(resolveWorkingDirectory, options.sessionId)
-    const context = {
-      model: options.model,
-      ...(options.purpose === undefined ? {} : { purpose: options.purpose }),
-      ...(options.sessionId === undefined ? {} : { sessionId: String(options.sessionId) }),
-      ...(cwd === undefined ? {} : { cwd }),
-    }
+    const context = { model: options.model, purpose: options.purpose, sessionId: options.sessionId, cwd,
+      reasoningEffort: options.reasoningEffort }
     return classifyRouteFailures(withRequestContext(context, send(clarified)))
   }
-
-  // Visibility affects discovery only. Resolution and prepared/in-flight
-  // turns still use the complete catalog, including a now-hidden model.
-  return new (class extends PiAiAdapter {
-    async prepareCall(provider, model, signal) {
-      await refreshDirectory(model)
-      const error = modelMetadataError(model)
-      if (error !== undefined) throw new LlmError(error, 'INVALID_CONFIG')
-      const prepared = await super.prepareCall(provider, model, signal)
-      return {
-        ...prepared,
-        // The prepared snapshot contains the full catalog, including the
-        // smaller title model; title routing must not read a newer host.
-        stream: options => inContext(titleRequest(options), routedOptions => prepared.stream(routedOptions)),
-      }
-    }
-
-    async *stream(options) {
-      await refreshDirectory(options.model)
-      const error = modelMetadataError(options.model)
-      if (error !== undefined) throw new LlmError(error, 'INVALID_CONFIG')
-      yield* inContext(titleRequest(options), routedOptions => super.stream(routedOptions))
-    }
-
-    async resolveModel(provider, model, signal) {
-      const ids = await refreshDirectory(model)
-      const error = ids?.has(model) ? modelMetadataError(model) : undefined
-      // DSH resolves every discovery row in a Promise.all. Missing metadata
-      // must remain a visible identity, without invented limits/capabilities.
-      if (provider === PROVIDER && error !== undefined) return { provider, id: model, name: model, description: error }
-      return super.resolveModel(provider, model, signal)
-    }
-
+  class DynamicAdapter extends PiAiAdapter {
     async listModels(provider) {
-      const ids = await refreshDirectory() ?? APOPHISCODE_MODEL_IDS
-      const models = await super.listModels(provider)
-      if (models.length === 0) return []
-      const byId = new Map(models.map(model => [model.id, model]))
-      return [...ids].filter(isModelVisible).map(id => byId.get(id) ?? {
-        provider, id, name: id, description: modelMetadataError(id),
-      })
+      if (provider !== PROVIDER) return []
+      const active = await ring.activeKey()
+      if (active === undefined) return []
+      return (await directory(active, modelApiHost(getApiHost?.())))
+        .filter(row => isModelVisible(row.id)).map(row => publicInfo(row.id, withReasoningReference(row.id, declaredMetadata(row))))
     }
-  })({
-    profiles: currentProfiles,
-    resolveApiKey: async () => {
-      // DSH 0.2.1 also asks before listing models, outside any request. That
-      // only needs a usable key to exist; the group reading a request waits
-      // for decides which key serves a model, not which models are listed.
-      const request = currentRequest()
-      const active = request === undefined ? await ring.activeKey() : await keys.active()
-      if (active === undefined) {
-        throw new LlmError(
-          'No usable ApophisCode API key: add one under Settings → ApophisCode, or re-enable the keys this plugin moved past.',
-          'MISSING_CREDENTIAL',
-        )
+    async resolveModel(provider, id, signal) {
+      if (provider !== PROVIDER) throw new LlmError('Unknown ApophisCode provider', 'UNKNOWN_MODEL')
+      const active = await ring.activeKey(), apiHost = modelApiHost(getApiHost?.())
+      if (active === undefined) throw new LlmError('No usable ApophisCode API key', 'MISSING_CREDENTIAL')
+      const row = (await directory(active, apiHost, signal)).find(item => item.id === id)
+      if (row === undefined) throw new LlmError('ApophisCode model is absent from the active key model list', 'UNKNOWN_MODEL')
+      return publicInfo(id, withReasoningReference(id, { ...protocols.peek({ apiHost, key: active.key, id }), ...declaredMetadata(row) }))
+    }
+    async prepareCall(provider, id, signal) {
+      if (provider !== PROVIDER) throw new LlmError('Unknown ApophisCode provider', 'UNKNOWN_MODEL')
+      const active = await keys.active(), apiHost = modelApiHost(getApiHost?.())
+      if (active === undefined) throw new LlmError('No usable ApophisCode API key: add one under Settings → ApophisCode', 'MISSING_CREDENTIAL')
+      const row = (await directory(active, apiHost, signal)).find(item => item.id === id)
+      if (row === undefined) throw new LlmError('ApophisCode model is absent from the active key model list', 'UNKNOWN_MODEL')
+      const referenceApi = reasoningReference(id)?.api
+      const metadata = withReasoningReference(id, await protocols.resolve({ apiHost, key: active.key, id, row, signal, referenceApi,
+        requestedApi: requestedModelProtocol(id) }))
+      const raw = createApophisCodeProvider({ apiHost, claudeCli, models: [{ ...metadata, input: metadata.input ?? ['text'] }] })
+      const guarded = method => (model, context, options) => guardKeyRotation(raw[method](model, context, {
+        ...options, sessionId: options?.sessionId ?? fallbackSessionId,
+      }), { key: active.key, onKeyFailure: keys.onKeyFailure })
+      const piProvider = { ...raw, stream: guarded('stream'), streamSimple: guarded('streamSimple') }
+      const profile = createApophisCodeProfile(piProvider)
+      // Each prepared call owns its host/key/descriptor snapshot. Late probes cannot mutate another call.
+      class PreparedAdapter extends PiAiAdapter {
+        modelInfo() { return publicInfo(id, metadata) }
       }
-      // A Claude request's transport follows its key's groups; give the
-      // first reading a moment so a cc key does not start out over HTTP.
-      if (claudeCli?.followsGroups?.() === true && isClaudeModel(request?.model)) await keys.awaitGroups?.()
-      return active.key
-    },
-    auth: Object.freeze({
-      credentials: ringCredentialStore(ring),
-      // Keys are explicitly stored by this plugin; an ambient
-      // Ambient environment keys must never authenticate a request on their own.
-      authContext: Object.freeze({
-        env: async () => undefined,
-        fileExists: async () => false,
-      }),
-    }),
-    resolveAttachments,
-  })
+      const adapter = new PreparedAdapter({ profiles: () => new Map([[PROVIDER, profile]]),
+        resolveApiKey: async () => active.key,
+        auth: { credentials: ringCredentialStore(ring), authContext: { env: async () => undefined, fileExists: async () => false } },
+        resolveAttachments,
+      })
+      const prepared = await adapter.prepareCall(provider, id, signal)
+      return { ...prepared, stream: options => {
+        if (options.model !== id || options.provider !== provider) throw new LlmError('ApophisCode prepared model identity changed', 'INVALID_REQUEST')
+        if (options.reasoningEffort !== undefined && !Object.hasOwn(metadata.reasoningEfforts ?? {}, options.reasoningEffort)) throw new LlmError('ApophisCode has no gateway or exact SDK declaration for this reasoning effort; select the provider default', 'UNSUPPORTED_REASONING_EFFORT')
+        if (metadata.input === undefined && options.messages.some(message => message.content?.some(block => block.type === 'image' || block.type === 'image-ref'))) {
+          throw new LlmError('ApophisCode image input capability is unverified for this key and model', 'UNSUPPORTED_CONTENT')
+        }
+        return inContext(options, routed => prepared.stream(routed))
+      } }
+    }
+    async *stream(options) {
+      const prepared = await this.prepareCall(options.provider, options.model, options.signal)
+      yield* prepared.stream(options)
+    }
+  }
+  return new DynamicAdapter({ profiles: () => new Map([[PROVIDER, createApophisCodeProfile(createApophisCodeProvider())]]) })
 }

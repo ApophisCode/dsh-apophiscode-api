@@ -15,6 +15,12 @@ const hostExternal = [
   '@earendil-works/pi-ai/api/lazy',
   '@earendil-works/pi-ai/api/openai-completions.lazy',
   '@earendil-works/pi-ai/api/openai-responses.lazy',
+  '@earendil-works/pi-ai/providers/anthropic',
+  '@earendil-works/pi-ai/providers/deepseek',
+  '@earendil-works/pi-ai/providers/google',
+  '@earendil-works/pi-ai/providers/openai',
+  '@earendil-works/pi-ai/providers/xai',
+  '@earendil-works/pi-ai/providers/all',
 ]
 const clientExternal = [
   'react',

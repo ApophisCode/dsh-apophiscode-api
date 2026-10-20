@@ -1,3 +1,4 @@
+import { modelRow } from './fixtures/declared-gateway.mjs'
 import assert from 'node:assert/strict'
 import { chmod, copyFile, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -24,7 +25,7 @@ function fakeGateway(t) {
     const url = new URL(request.url)
     const key = request.headers.get('authorization')?.replace(/^Bearer /u, '')
     if (url.pathname === '/api/v1/model-plaza') return Response.json({ code: 0, data: { groups: [{ id: 1, name: 'claude - 满血Max', models: CLAUDE.map(name => ({ name })) }] } })
-    if (url.pathname === '/v1/models') return Response.json({ data: CLAUDE.map(id => ({ id })) })
+    if (url.pathname === '/v1/models') return Response.json({ data: CLAUDE.map(modelRow) })
     if (url.pathname === '/v1/messages') {
       const body = await request.json()
       httpKeys.push(key)

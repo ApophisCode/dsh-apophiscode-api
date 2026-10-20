@@ -7,20 +7,9 @@
  *   session runs on a ApophisCode model, and hands every other request to the
  *   provider DSH would have used without this plugin.
  *
- * The inherited search route performs one model call with
- * the vendor's server-side search tool; Apophis support requires verification.
- * The user picks the backend:
- * - `deepseek`: Anthropic Messages at `/v1/messages`, `deepseek-flash`, with
- *   the `web_search_20250305` server tool. Results come from its structured
- *   `web_search_tool_result` blocks, never from prose.
- * - `gpt`: OpenAI Responses at `/v1/responses`, `gpt-6.1-sol`, with the
- *   hosted `web_search` tool. Results come from `url_citation` annotations and
- *   the `web_search_call` actions.
- *
- * Only keys stored in this plugin's key ring authenticate a search; there is no
- * fallback to another credential. A key the gateway reports as exhausted or
- * rejected is moved aside exactly as on the model route, and the search tries
- * the next usable key.
+ * The active key supplies exact model IDs. The selected model's verified
+ * protocol determines the server-search encoding; structured search results
+ * are required before reporting success. No model is substituted.
  *
  * @module dsh-apophiscode-api/search
  */
@@ -30,10 +19,11 @@ import { AsyncLocalStorage } from 'node:async_hooks'
 import { HarnessError } from '@deepseek-ai/dsh-llm'
 
 import { PROVIDER } from './constants.js'
-import { classifyClientPolicy, classifyCoverage, classifyGatewayFailure, explainClientPolicyFailure } from './failures.js'
+import { classifyClientPolicy, classifyGatewayFailure, explainClientPolicyFailure } from './failures.js'
 import { ambientFetch, boundedFetch } from './request.js'
 import { redactSecrets } from './secret-redactor.js'
 import { apiRootHost } from './hosts.js'
+import { createModelProtocolResolver } from './model-protocol.js'
 
 /** Search provider that always searches through ApophisCode. */
 export const APOPHISCODE_SEARCH_PROVIDER_ID = 'apophiscode-api'
@@ -50,30 +40,12 @@ export const SEARCH_MODE_AUTO = 'auto'
 export const SEARCH_MODE_APOPHISCODE = 'apophiscode'
 export const SEARCH_MODES = Object.freeze([SEARCH_MODE_DEFAULT, SEARCH_MODE_AUTO, SEARCH_MODE_APOPHISCODE])
 
-/** Search backends the user picks between. */
-export const SEARCH_BACKEND_DEEPSEEK = 'deepseek'
-export const SEARCH_BACKEND_GPT = 'gpt'
-export const SEARCH_BACKENDS = Object.freeze([SEARCH_BACKEND_DEEPSEEK, SEARCH_BACKEND_GPT])
-/**
- * Retain the upstream default without claiming live support or pricing on
- * Apophis. Each backend must return actual structured server search evidence.
- */
-export const DEFAULT_SEARCH_BACKEND = SEARCH_BACKEND_DEEPSEEK
-
-/** The model each backend searches with. */
-export const SEARCH_BACKEND_MODELS = Object.freeze({
-  [SEARCH_BACKEND_DEEPSEEK]: 'deepseek-flash',
-  [SEARCH_BACKEND_GPT]: 'gpt-6.1-sol',
-})
-
 /** Bound on one search request, below the `web_search` tool's 60 s budget. */
 export const DEFAULT_SEARCH_TIMEOUT_MS = 55_000
 /** Upper bound on server-side searches inside one DeepSeek request. */
-const DEEPSEEK_MAX_USES = 3
+const SEARCH_MAX_USES = 3
 const MAX_OUTPUT_TOKENS = 4096
 const ANTHROPIC_VERSION = '2023-06-01'
-/** Distinct keys one search may try before reporting the last failure. */
-const MAX_KEY_ATTEMPTS = 4
 const MAX_CONTENT_CHARS = 4000
 const MAX_SNIPPET_CHARS = 500
 const MAX_TITLE_CHARS = 200
@@ -224,10 +196,10 @@ export function parseResponsesSearchResponse(response) {
 }
 
 /** Build one backend's request; the key is attached by the caller. */
-export function buildSearchRequest(backend, { apiHost, query, sessionId }) {
+export function buildSearchRequest(backend, { apiHost, model, query, sessionId }) {
   const root = apiRootHost(apiHost)
-  const model = SEARCH_BACKEND_MODELS[backend]
-  if (backend === SEARCH_BACKEND_GPT) {
+  if (typeof model !== 'string' || model === '') throw new WebError('ApophisCode search needs an active-key model', 'WEB_PROVIDER_UNAVAILABLE')
+  if (backend === 'openai-responses') {
     return {
       url: `${root}/v1/responses`,
       model,
@@ -245,7 +217,6 @@ export function buildSearchRequest(backend, { apiHost, query, sessionId }) {
         tools: [{ type: 'web_search' }],
         tool_choice: 'required',
         include: ['web_search_call.action.sources'],
-        reasoning: { effort: 'low' },
         max_output_tokens: MAX_OUTPUT_TOKENS,
         store: false,
         ...(typeof sessionId === 'string' && sessionId !== '' ? { prompt_cache_key: sessionId } : {}),
@@ -253,11 +224,11 @@ export function buildSearchRequest(backend, { apiHost, query, sessionId }) {
       parse: parseResponsesSearchResponse,
     }
   }
-  if (backend === SEARCH_BACKEND_DEEPSEEK) {
+  if (backend === 'anthropic-messages') {
     return {
       url: `${root}/v1/messages`,
       model,
-      headers: key => ({ 'x-api-key': key, 'anthropic-version': ANTHROPIC_VERSION }),
+      headers: key => ({ authorization: `Bearer ${key}`, 'anthropic-version': ANTHROPIC_VERSION }),
       body: {
         model,
         max_tokens: MAX_OUTPUT_TOKENS,
@@ -265,7 +236,7 @@ export function buildSearchRequest(backend, { apiHost, query, sessionId }) {
           role: 'user',
           content: `Perform a web search for the query: ${query}\n\nThen reply with a concise factual summary of what the results say.`,
         }],
-        tools: [{ type: 'web_search_20250305', name: 'web_search', max_uses: DEEPSEEK_MAX_USES }],
+        tools: [{ type: 'web_search_20250305', name: 'web_search', max_uses: SEARCH_MAX_USES }],
       },
       parse: parseMessagesSearchResponse,
     }
@@ -309,9 +280,10 @@ function isAbort(error, signal) {
 export function createApophisCodeSearchProvider({
   ring,
   hosts,
-  backend = () => DEFAULT_SEARCH_BACKEND,
+  selectedModel = () => '',
+  availableModels = async () => [],
+  protocols = createModelProtocolResolver(),
   onKeyFailure,
-  covers,
   resolveSessionId,
   fetchImpl = ambientFetch,
   timeoutMs = DEFAULT_SEARCH_TIMEOUT_MS,
@@ -368,81 +340,33 @@ export function createApophisCodeSearchProvider({
       if (signal?.aborted === true) throw new WebError('ApophisCode search aborted', 'WEB_ABORTED', { cause: signal.reason })
       const query = text(searchRequest?.query).trim()
       if (query === '') throw new WebError('ApophisCode search needs a non-empty query', 'WEB_PROVIDER_ERROR')
-      const chosen = SEARCH_BACKENDS.includes(backend()) ? backend() : DEFAULT_SEARCH_BACKEND
-      const request = buildSearchRequest(chosen, {
-        apiHost: hosts().apiHost,
-        query,
-        // An MCP invocation supplies the originating session captured by
-        // the host; HTTP callbacks no longer have the agent's async context.
-        sessionId: searchRequest?.sessionId ?? resolveSessionId?.(),
-      })
-
-      const candidates = await orderedKeys(ring, request.model, covers)
-      let lastFailure
-      let uncovered = false
-      for (const key of candidates.slice(0, MAX_KEY_ATTEMPTS)) {
-        const outcome = await attempt(request, key.key, signal)
-        if (outcome.value !== undefined) return outcome.value
-
-        const failure = outcome.failure === '' ? `HTTP ${outcome.status}` : outcome.failure
-        lastFailure = failure
-        if (classifyClientPolicy(failure)) {
-          throw new WebError(explainClientPolicyFailure(), 'WEB_PROVIDER_ERROR')
-        }
-        const kind = classifyGatewayFailure(failure) ?? (outcome.status === 401 ? 'invalid-key' : undefined)
-        if (kind !== undefined) {
-          // The same sink the model route uses: the key moves aside for both.
-          onKeyFailure?.(kind, failure, key.key, key.id)
-          continue
-        }
-        if (classifyCoverage(failure)) {
-          // This key's groups do not reach the model; another key's might.
-          uncovered = true
-          continue
-        }
-        throw new WebError(`ApophisCode search failed (HTTP ${outcome.status}): ${failure}`, 'WEB_PROVIDER_ERROR')
+      const key = await ring.activeKey()
+      if (key === undefined) throw new WebError('ApophisCode search has no usable API key; add one under Settings → ApophisCode', 'WEB_PROVIDER_CREDENTIAL_MISSING')
+      const apiHost = hosts().apiHost
+      let rows, metadata
+      try {
+        rows = await availableModels({ entry: key, apiHost, signal })
+      } catch {
+        throw new WebError('ApophisCode search model list could not be read', signal?.aborted ? 'WEB_ABORTED' : 'WEB_PROVIDER_UNAVAILABLE')
       }
-
-      if (candidates.length === 0) {
-        throw new WebError('ApophisCode search has no usable API key; add one under Settings → ApophisCode', 'WEB_PROVIDER_CREDENTIAL_MISSING')
+      const id = selectedModel() || rows[0]?.id
+      const row = rows.find(item => item.id === id)
+      if (row === undefined) throw new WebError('ApophisCode search model is absent from the active key model list', 'WEB_PROVIDER_UNAVAILABLE')
+      try {
+        metadata = await protocols.resolve({ apiHost, key: key.key, id, row, signal })
+      } catch {
+        throw new WebError('ApophisCode search protocol verification could not complete; no search was sent', signal?.aborted ? 'WEB_ABORTED' : 'WEB_PROVIDER_UNAVAILABLE')
       }
-      if (uncovered) {
-        const other = chosen === SEARCH_BACKEND_GPT ? SEARCH_BACKEND_DEEPSEEK : SEARCH_BACKEND_GPT
-        throw new WebError(
-          `ApophisCode search: no stored API key's group covers ${request.model} (${chosen} backend). `
-            + `Switch the search backend to "${other}" under Settings → ApophisCode → Web search, or add a key whose group includes it. `
-            + `Gateway said: ${lastFailure}`,
-          'WEB_PROVIDER_ERROR',
-        )
-      }
-      throw new WebError(`ApophisCode search: every usable key was refused (${lastFailure ?? 'no detail'})`, 'WEB_PROVIDER_CREDENTIAL_MISSING')
+      const request = buildSearchRequest(metadata.api, { apiHost, model: id, query,
+        sessionId: searchRequest?.sessionId ?? resolveSessionId?.() })
+      const outcome = await attempt(request, key.key, signal)
+      if (outcome.value !== undefined) return outcome.value
+      if (classifyClientPolicy(outcome.failure)) throw new WebError(explainClientPolicyFailure(outcome.failure), 'WEB_PROVIDER_ERROR')
+      const kind = classifyGatewayFailure(outcome.failure) ?? (outcome.status === 401 ? 'invalid-key' : undefined)
+      if (kind !== undefined) onKeyFailure?.(kind, outcome.failure, key.key, key.id)
+      throw new WebError(`ApophisCode search failed (HTTP ${outcome.status}): ${outcome.failure}`, 'WEB_PROVIDER_ERROR')
     },
   })
-}
-
-/**
- * The keys one search tries, in order: the active key, then the other usable
- * keys in ring order — except that a key the group reading shows cannot reach
- * the backend's model goes last, behind every key that can or may.
- * @param ring - the key ring.
- * @param modelId - the backend's model.
- * @param covers - `(keyId, modelId) => true | false | undefined`, optional.
- * @returns the candidates, without key material beyond what the request needs.
- */
-async function orderedKeys(ring, modelId, covers) {
-  const active = await ring.activeKey()
-  if (active === undefined) return []
-  const usable = typeof ring.secrets === 'function' ? (await ring.secrets()).filter(entry => !entry.disabled) : []
-  const start = usable.findIndex(entry => entry.id === active.id)
-  const rest = start < 0 ? usable.filter(entry => entry.id !== active.id) : [...usable.slice(start + 1), ...usable.slice(0, start)]
-  const rank = entry => {
-    const value = covers?.(entry.id, modelId)
-    return value === true ? 0 : value === false ? 2 : 1
-  }
-  return [active, ...rest]
-    .map((entry, index) => ({ entry, index, rank: index === 0 && rank(entry) !== 2 ? -1 : rank(entry) }))
-    .sort((left, right) => left.rank - right.rank || left.index - right.index)
-    .map(({ entry }) => ({ id: entry.id, label: entry.label, key: entry.key }))
 }
 
 /** Marks a request already passing through the auto provider's fallback. */

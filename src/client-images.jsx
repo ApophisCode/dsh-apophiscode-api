@@ -7,7 +7,7 @@ import { readOriginalImage } from './client-image-download.js'
 import { createImageViewer, ApophisCodeImageViewer } from './client-image-viewer.jsx'
 import { KeyRenameForm, useKeyRename } from './client-key-rename.jsx'
 
-const imageModelLabel = id => id.replace('gpt-image-', 'GPT Image ').replace('-flare', ' Flare').replace('-sunburst', ' Sunburst')
+const imageModelLabel = id => id
 
 /** Only projections come back from the host; the password draft is cleared on success. */
 export function ApophisCodeImagesCard({ call, t }) {
@@ -62,9 +62,10 @@ export function ApophisCodeImagesCard({ call, t }) {
   const rename = useKeyRename(({ id, label }) => mutate('images/keys/rename', { id, label }))
   const disabled = busy || state?.writable !== true
   const models = state?.models ?? []
-  const qualities = models.find(model => model.id === state?.imageModel)?.qualities ?? []
+  const qualities = [...new Set([...(models.find(model => model.id === state?.imageModel)?.qualities ?? ['auto']), state?.imageQuality ?? 'auto'])]
   const rows = (state?.keys ?? []).map(entry => balance?.keys?.find(row => row.id === entry.id) ?? { id: entry.id })
   return <section className="apc-card">
+    {state?.modelError && <p className="apc-error" role="alert">{state.modelError}</p>}
     <header className="apc-head"><h3 className="apc-title">{t('imagesTitle')}</h3><span className="apc-actions">
       <button className="apc-btn" type="button" disabled={busy || balanceLoading} onClick={() => { void readBalance(true) }}>{balanceLoading ? t('refreshing') : t('refresh')}</button>
     </span></header>
@@ -78,7 +79,8 @@ export function ApophisCodeImagesCard({ call, t }) {
       </label>
       <label className="apc-setting"><span className="apc-label">{t('imagesModel')}</span>
         <select className="apc-input apc-image-choice" value={state.imageModel} disabled={disabled || !state.imageEnabled}
-          onChange={event => { void mutate('images/update', { imageModel: event.target.value, imageQuality: 'auto' }) }}>
+          onChange={event => { void mutate('images/update', { imageModel: event.target.value }) }}>
+          <option value="">{t('imagesModelDefault')}</option>
           {models.map(model => <option key={model.id} value={model.id}>{imageModelLabel(model.id)}</option>)}
         </select>
       </label>

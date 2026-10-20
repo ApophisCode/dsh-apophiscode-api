@@ -57,7 +57,7 @@ for (const model of MODELS) test(`${model}: registered Messages route executes o
     assert.equal(headers.get('x-claude-code-session-id'), null)
     assert.equal(body.metadata?.user_id, undefined)
     assert.equal(body.model, model)
-    assert.equal(body.output_config.effort, 'low')
+    assert.equal(body.output_config?.effort, undefined)
   }
   assert.equal(result.call.id, 'call_signed_inventory')
   assert.equal(result.executed, 1)

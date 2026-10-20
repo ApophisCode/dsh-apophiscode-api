@@ -1,37 +1,17 @@
 #!/usr/bin/env node
-/**
- * Live check for the built plugin.
- *
- * Drives the *built* host bundle against the real ApophisCode gateway with the
- * key already stored in the DSH credentials file, through the same route the
- * plugin registers (`createRouteAdapter` over a key chooser and group reader):
- * it reads the balance and the key's groups, streams one answer per HTTP
- * model, rehearses rotation with a deliberately invalid key in front of the
- * real one, and reports how the host adapter classifies a key rejection — the
- * classification the harness's retry policy reads.
- *
- * It prints no key material, only a masked tail. Run it from the repository
- * root after `pnpm run build`:
- *
- *   node scripts/live-check.mjs [--with-search] [--with-vision] [--key-label LABEL] [--model MODEL]
- *
- * `--with-search` runs one web search per backend, spending more quota
- * than the default run.
- * `--model` limits the run to one HTTP model, its balance/groups and optional
- * vision checks, skipping unrelated rotation/search/RPC checks.
- * `--with-vision` checks DeepSeek (or the selected HTTP model) with two color
- * images through the host's attachment service; the prompt hides the colors.
+/** Paid opt-in checks for one exact active-key model through the built HTTP route.
+ * Requires --model; optional --with-search and --with-vision add requests.
+ * Reads only plugin-owned stored credentials and never changes DSH state.
  */
 
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
+import { exactModel } from './gateway-directory.mjs'
 import { readStoredKey } from './stored-key.mjs'
 import { createVisionFixture } from './vision-fixture.mjs'
 import { createBusinessScenario, matchesBusinessAnswer } from './claude-scenarios.mjs'
 
 import {
-  APOPHISCODE_MODEL_IDS,
   ApophisCodeKeyRing,
-  SEARCH_BACKENDS,
   createBalanceReader,
   createGroupReader,
   createKeyChooser,
@@ -43,21 +23,21 @@ import {
 const PROVIDER = 'apophiscode'
 const SESSION_ID = 'live-check-session'
 const HOSTS = Object.freeze({ apiHost: 'https://www.apophis.uk', statusHost: 'https://www.apophis.uk' })
-const HTTP_MODELS = [...APOPHISCODE_MODEL_IDS]
+
 
 /** In-memory stand-in for the DSH credential-record service. */
 function fakeCredentials() {
-  let record
+  const records = new Map()
   let chain = Promise.resolve()
   return {
-    async readRecord() {
-      return record
+    async readRecord(id) {
+      return records.get(id)
     },
-    modifyRecord(_key, mutate) {
+    modifyRecord(id, mutate) {
       const run = chain.then(async () => {
-        const next = await mutate(record)
-        if (next !== undefined) record = next
-        return record
+        const next = await mutate(records.get(id))
+        if (next !== undefined) records.set(id, next)
+        return records.get(id)
       })
       chain = run.then(() => undefined, () => undefined)
       return run
@@ -70,22 +50,13 @@ const logger = {
   info: (format, ...args) => console.log(`   · ${format}`, ...args),
 }
 
-/** A group reader with no evidence, so key choice falls back to ring order. */
-const NO_GROUPS = Object.freeze({
-  read: async () => ({ keys: [], descriptions: {}, requirements: {}, fetchedAt: Date.now() }),
-  hasReading: () => true,
-  covers: () => undefined,
-  groupsOf: () => undefined,
-  requiredGroups: () => undefined,
-})
-
 /** The plugin's composition, around one ring. */
 async function routeWith(entries, { groupReader, resolveAttachments } = {}) {
   const ring = new ApophisCodeKeyRing(fakeCredentials())
   for (const [key, label] of entries) await ring.add(key, label)
-  const groups = groupReader ?? createGroupReader({ listKeys: () => ring.secrets(), getHosts: () => HOSTS })
+  const groups = groupReader ?? createGroupReader({ listKeys: () => ring.secrets(), getHosts: () => HOSTS, getActiveKey: () => ring.activeKey() })
   const keys = createKeyChooser({ ring, groups, logger })
-  const adapter = createRouteAdapter({ ring, keys, fallbackSessionId: SESSION_ID, resolveAttachments })
+  const adapter = createRouteAdapter({ ring, keys, getApiHost: () => HOSTS.apiHost, availableModels: groups.availableModels, fallbackSessionId: SESSION_ID, resolveAttachments })
   return { ring, groups, keys, adapter }
 }
 
@@ -98,7 +69,6 @@ async function turn(adapter, model, text = 'Reply with exactly: ok', { image } =
     provider: PROVIDER,
     model,
     sessionId: SESSION_ID,
-    reasoningEffort: 'high',
     maxTokens: 2048,
     signal: AbortSignal.timeout(90_000),
     messages: [createUserMessage({ content: [{ type: 'text', text }, ...(image === undefined ? [] : [image])], source: { kind: 'user' } })],
@@ -115,14 +85,13 @@ const describe = ({ answer, finish }) => (finish?.kind === 'stop'
 
 async function main() {
   const modelIndex = process.argv.indexOf('--model')
-  const selectedModel = modelIndex < 0 ? undefined : process.argv[modelIndex + 1]
-  if (modelIndex >= 0 && !HTTP_MODELS.includes(selectedModel)) throw new Error('--model needs a catalog HTTP model id')
+  const selectedModel = exactModel(modelIndex < 0 ? undefined : process.argv[modelIndex + 1])
   const labelIndex = process.argv.indexOf('--key-label')
   const label = labelIndex < 0 ? undefined : process.argv[labelIndex + 1]
   if (labelIndex >= 0 && (label === undefined || label.startsWith('--'))) throw new Error('--key-label needs a key label')
   const key = await readStoredKey({ label })
-  const mask = text => String(text).split(key).join(`…${key.slice(-4)}`)
-  console.log(`stored key: …${key.slice(-4)} (${key.length} chars)\n`)
+  const mask = text => String(text).split(key).join('[redacted]')
+  console.log('Using the selected plugin-owned stored key')
   let visionFixture
   const route = await routeWith([[key, 'live-check']], { resolveAttachments: () => visionFixture?.attachments })
   const checkVision = async model => {
@@ -154,52 +123,20 @@ async function main() {
   console.log(`   projection carries key material: ${JSON.stringify(groups).includes(key) ? 'YES (bug)' : 'no'}\n`)
 
   console.log('3) one answer per HTTP model, through the registered route')
-  for (const id of selectedModel === undefined ? HTTP_MODELS : [selectedModel]) {
-    const scenario = id.startsWith('claude-') ? createBusinessScenario('text') : undefined
+  for (const id of [selectedModel]) {
+    const scenario = createBusinessScenario('text')
     const result = await turn(route.adapter, id, scenario?.prompt)
     console.log(`   ${id.padEnd(16)} ${mask(describe(result))}`)
     const valid = scenario === undefined || matchesBusinessAnswer(scenario, result.answer)
     if (!valid) console.log(`   business validation failed: ${mask(JSON.stringify({ scenario: scenario.id, answer: result.answer, finish: result.finish })).slice(0, 800)}`)
     if (result.finish?.kind !== 'stop' || !valid) process.exitCode = 1
   }
-  if (selectedModel !== undefined) {
-    if (process.argv.includes('--with-vision')) await checkVision(selectedModel)
-    return
-  }
-
-  console.log('\n4) an invalid key in front of the real one')
-  const passOver = await routeWith([['sk-invalid-live-check-0001', 'deliberately invalid'], [key, 'real key']])
-  console.log(`   with group evidence (the reader saw the gateway reject it): ${mask(describe(await turn(passOver.adapter, 'deepseek-flash')))}`)
-  console.log('   without group evidence, the rotation itself:')
-  const rotation = await routeWith([['sk-invalid-live-check-0001', 'deliberately invalid'], [key, 'real key']], { groupReader: NO_GROUPS })
-  for (let attempt = 1; attempt <= 2; attempt += 1) {
-    const active = await rotation.ring.activeKey()
-    console.log(`   attempt ${attempt}: using "${active.label}" ${mask(describe(await turn(rotation.adapter, 'deepseek-flash')))}`)
-    // The rotation lands asynchronously after the failed stream.
-    await new Promise(resolve => setTimeout(resolve, 200))
-  }
-  const state = await rotation.ring.list()
-  console.log(`   ring now: ${state.keys.map(item => `${item.label}=${item.disabled ? `disabled(${item.disabledReason})` : 'usable'}`).join(', ')}`)
-
-  console.log('\n5) how the host adapter classifies a rejected key (what the retry policy reads)')
-  const rejected = await routeWith([['sk-invalid-live-check-0002', 'rejected by the gateway']])
-  const { finish } = await turn(rejected.adapter, 'deepseek-flash')
-  console.log(`   finish: ${mask(JSON.stringify(finish)?.slice(0, 200))}`)
-
+  if (process.argv.includes('--with-vision')) await checkVision(selectedModel)
   if (process.argv.includes('--with-search')) {
-    console.log('\n6) one web search per backend')
-    for (const backend of SEARCH_BACKENDS) {
-      const provider = createApophisCodeSearchProvider({ ring: route.ring, hosts: () => HOSTS, backend: () => backend, covers: route.keys.covers, onKeyFailure: route.keys.onKeyFailure })
-      const started = Date.now()
-      try {
-        const found = await provider.search({ query: 'latest Node.js release', maxResults: 8 })
-        console.log(`   ${backend.padEnd(9)} → ${found.sources.length} sources in ${((Date.now() - started) / 1000).toFixed(1)}s; first: ${found.sources[0]?.url ?? '—'}`)
-      } catch (error) {
-        console.log(`   ${backend.padEnd(9)} → ${error.code}: ${mask(error.message).slice(0, 200)}`)
-      }
-    }
-  } else {
-    console.log('\n6) web search skipped (pass --with-search to run one search per backend)')
+    const provider = createApophisCodeSearchProvider({ ring: route.ring, hosts: () => HOSTS,
+      selectedModel: () => selectedModel, availableModels: route.groups.availableModels, onKeyFailure: route.keys.onKeyFailure })
+    const found = await provider.search({ query: 'latest Node.js release', maxResults: 8 })
+    console.log(`Search returned ${found.sources.length} sources`)
   }
 
   console.log('\n7) what the settings panel receives over RPC')
@@ -220,10 +157,7 @@ async function main() {
   console.log(`   groups ok=${groupProjection.ok}: ${groupProjection.value?.keys?.[0]?.groups?.join(', ')}`)
   console.log(`   projections carry key material: ${JSON.stringify([projection, groupProjection]).includes(key) ? 'YES (bug)' : 'no'}`)
 
-  if (process.argv.includes('--with-vision')) {
-    console.log('\n8) DeepSeek identifies images through the registered route')
-    await checkVision('deepseek-flash')
-  }
+
 }
 
 await main()

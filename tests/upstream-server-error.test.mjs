@@ -5,7 +5,7 @@ import { createUserMessage } from '@deepseek-ai/dsh-llm'
 
 import { classifyGatewayFailure, classifyUpstreamServerError } from '../src/failures.js'
 import { ApophisCodeKeyRing } from '../src/key-ring.js'
-import { createRouteAdapter } from '../src/route.js'
+import { createRouteAdapter } from './fixtures/declared-gateway.mjs'
 import { fakeCredentials } from './helpers.mjs'
 
 const KEY = 'sk-fixture-only-not-a-real-key'

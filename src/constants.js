@@ -30,6 +30,3 @@ export const LEGACY_STATUS_HOSTS = Object.freeze([])
 export const DEFAULT_BALANCE_TTL_MS = 60_000
 /** Bound on every account request this plugin makes. */
 export const DEFAULT_REQUEST_TIMEOUT_MS = 20_000
-
-/** Effort level the route requests when a session names none. */
-export const DEFAULT_REASONING_LEVEL = 'high'

@@ -69,8 +69,9 @@ test('CLI assistant images survive chat replay as view projections of the owned 
   assert.equal(view.data.blocks[0].kind, 'tool-result')
   assert.equal(view.anchorSeq, 8.025)
   assert.deepEqual(imageConversationNode.buildViewNode(context([JSON.parse(JSON.stringify(event)), end])), view)
+  assert.deepEqual(imageConversationNode.match({ ...event, data: { ...event.data, message: { ...event.data.message, source: { kind: 'model', provider: 'apophiscode', model: 'arbitrary-id' } } } }), { id: 'cli:7', role: 'update' })
   assert.equal(event.data.message.content.length, 2, 'no synthetic tool event is persisted')
-  for (const source of [{ kind: 'user' }, { kind: 'plugin', plugin: 'other' }, { kind: 'model', provider: 'other', model: 'claude-opus-5-5' }, { kind: 'model', provider: 'apophiscode', model: 'gpt-6.1-sol' }]) {
+  for (const source of [{ kind: 'user' }, { kind: 'plugin', plugin: 'other' }, { kind: 'model', provider: 'other', model: 'claude-opus-5-5' }]) {
     assert.equal(imageConversationNode.match({ ...event, data: { ...event.data, message: { ...event.data.message, source } } }), null)
   }
 })

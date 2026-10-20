@@ -17,6 +17,7 @@ test('built image settings persist quality choices, constrain menus by model and
   let invalidations = 0
   const images = createImageController({
     ring,
+    availableModels: async () => ['gpt-image-2', 'gpt-image-2.5-sunburst', 'gpt-image-2.5-flare'].map(id => ({ id, image_qualities: ['low', 'medium', 'high', 'xhigh', 'max'] })),
     balance: {
       invalidate() { invalidations += 1 },
       async read(options) {
@@ -92,13 +93,13 @@ test('built image settings persist quality choices, constrain menus by model and
   show(); await tick()
   const select = label => show().find(node => node.type === 'label' && nodes(node.props.children).some(child => child.props?.children === label)).props.children[1]
   assert.equal(select(zh.imagesQuality).props.value, 'auto')
-  assert.equal(nodes(select(zh.imagesQuality)).filter(node => node.type === 'option').length, 4)
+  assert.equal(nodes(select(zh.imagesQuality)).filter(node => node.type === 'option').length, 1)
   select(zh.imagesModel).props.onChange({ target: { value: 'gpt-image-2.5-sunburst' } }); await tick()
   assert.equal(nodes(select(zh.imagesQuality)).filter(node => node.type === 'option').length, 6)
   select(zh.imagesQuality).props.onChange({ target: { value: 'max' } }); await tick()
   assert.equal(select(zh.imagesQuality).props.value, 'max')
   select(zh.imagesModel).props.onChange({ target: { value: 'gpt-image-2' } }); await tick()
-  assert.equal(select(zh.imagesQuality).props.value, 'auto')
+  assert.equal(select(zh.imagesQuality).props.value, 'max')
   const password = () => show().find(node => node.type === 'input' && node.props.type === 'password')
   password().props.onChange({ target: { value: 'sk-fixture-separate-image' } })
   assert.equal(password().props.value, 'sk-fixture-separate-image')

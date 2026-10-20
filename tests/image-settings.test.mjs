@@ -11,6 +11,8 @@ import { createApophisCodeRpc } from '../src/rpc.js'
 import { createBalanceReader } from '../src/balance.js'
 import { readStoredKey } from '../scripts/stored-key.mjs'
 import { apply } from '../src/index.js'
+import { mockGateway } from './fixtures/declared-gateway.mjs'
+const IMAGE_ROWS = ['gpt-image-2', 'gpt-image-2.5-sunburst', 'gpt-image-2.5-flare'].map(id => ({ id, image_qualities: ['high', 'max'] }))
 
 function credentials() {
   const records = new Map()
@@ -34,7 +36,7 @@ function setup({ createImageBalance } = {}) {
   let preference = {}
   let writable = true
   const updates = []
-  const images = createImageController({ ring: imageRing, balance: imageBalance, readPreference: () => preference, isWritable: () => writable, writePreference: async patch => { updates.push(patch); preference = { ...preference, ...patch } } })
+  const images = createImageController({ availableModels: async () => IMAGE_ROWS, ring: imageRing, balance: imageBalance, readPreference: () => preference, isWritable: () => writable, writePreference: async patch => { updates.push(patch); preference = { ...preference, ...patch } } })
   return { store, ring, imageRing, images, imageBalance, updates, readOnly: () => { writable = false } }
 }
 
@@ -140,14 +142,14 @@ test('tool registration follows key availability and settings without reloading 
   assert.equal((await images.status()).available, false)
 })
 
-test('quality is checked before writes and switching to Image 2 explicitly resets incompatible quality', async () => {
+test('image settings validate syntax and preserve explicit qualities across exact-model changes', async () => {
   const { images, updates, readOnly } = setup()
-  assert.deepEqual(readImagePreference(), { imageEnabled: true, imageModel: 'gpt-image-2', imageQuality: 'auto' })
-  await assert.rejects(() => images.update({ imageQuality: 'max' }), /not supported/u)
+  assert.deepEqual(readImagePreference(), { imageEnabled: true, imageModel: '', imageQuality: 'auto' })
+  await assert.rejects(() => images.update({ imageModel: 'gpt-image-2', imageQuality: '' }), /invalid/u)
   assert.equal(updates.length, 0)
   await images.update({ imageModel: 'gpt-image-2.5-flare', imageQuality: 'max' })
   await images.update({ imageModel: 'gpt-image-2' })
-  assert.deepEqual(updates.at(-1), { imageModel: 'gpt-image-2', imageQuality: 'auto' })
+  assert.deepEqual(updates.at(-1), { imageModel: 'gpt-image-2' })
   await assert.rejects(() => images.update({ imageEnabled: 'true' }), /boolean/u)
   readOnly()
   await assert.rejects(() => images.update({ imageEnabled: false }), /not writable/u)
@@ -165,7 +167,7 @@ test('image RPC replies contain only projections and do not invalidate conversat
   assert.equal(JSON.stringify(reply).includes('sk-fixture'), false)
   assert.equal((await rpc('status')).value.keys[0].label, 'chat')
   assert.equal(invalidated, 0)
-  const rejected = await rpc('images/update', { imageModel: 'gpt-image-2', imageQuality: 'xhigh' })
+  const rejected = await rpc('images/update', { imageModel: 'gpt-image-2', imageQuality: '' })
   assert.equal(rejected.ok, false)
   assert.equal(rejected.error.code, 'apophiscode/request-failed')
 })
@@ -225,6 +227,7 @@ test('paid image checks read only the image credential record and never fall bac
 })
 
 test('apply wires the dedicated image ring, live settings, native tool and removal together', async t => {
+  mockGateway(t, () => assert.fail('only directory reads allowed'), IMAGE_ROWS)
   const store = credentials()
   const tools = new Map()
   let handler
@@ -258,6 +261,7 @@ test('apply wires the dedicated image ring, live settings, native tool and remov
   t.after(() => { globalThis.fetch = previousFetch })
   let balanceCalls = 0
   globalThis.fetch = async (url, init) => {
+    if (new URL(url).pathname.endsWith('/v1/models')) return Response.json({ data: IMAGE_ROWS })
     balanceCalls += 1
     assert.equal(new URL(url).pathname, '/v1/usage')
     assert.equal(new Headers(init.headers).get('authorization'), 'Bearer sk-fixture-image')
@@ -273,4 +277,20 @@ test('apply wires the dedicated image ring, live settings, native tool and remov
   await handler('images/update', { imageEnabled: false })
   assert.equal(tools.has('apophiscode_image_generate'), false)
   assert.equal((await handler('status')).value.keys.length, 1)
+})
+
+
+test('saving an image key reports a directory failure without misreporting the credential write', async () => {
+  const ring = new ApophisCodeKeyRing(credentials(), { recordId: 'image-keys' })
+  const images = createImageController({ ring, readPreference: () => ({}), isWritable: () => true,
+    availableModels: async () => { throw new Error('upstream private diagnostic') },
+    writePreference: () => assert.fail('not saving settings'),
+  })
+  const reply = await createApophisCodeRpc({ images })('images/keys/add', { key: 'sk-offline-directory-failure' })
+  assert.equal(reply.ok, true)
+  assert.equal(reply.value.keys.length, 1)
+  assert.deepEqual(reply.value.models, [])
+  assert.match(reply.value.modelError, /model list could not be read/u)
+  assert.equal(JSON.stringify(reply).includes('private diagnostic'), false)
+  await assert.rejects(images.update({ imageQuality: '' }), /invalid/u)
 })

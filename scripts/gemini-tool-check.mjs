@@ -5,13 +5,15 @@
  * is started or modified. Each round spends two small model calls. This is a
  * signature diagnostic; scripts/tool-check.mjs verifies actual ToolRuntime execution.
  *
- * node scripts/gemini-tool-check.mjs [--model gemini-3.8-flash|gemini-4-argon]
+ * node scripts/gemini-tool-check.mjs --model EXACT_ID
  *   [--rounds 1..5] [--reasoning low|medium|high] [--key-label LABEL]
  */
 import { createHash, randomUUID } from 'node:crypto'
 import { BlockAssembler, createToolResultMessage, createUserMessage } from '@deepseek-ai/dsh-llm'
 
 import { ApophisCodeKeyRing, createRouteAdapter } from '../lib/index.js'
+import { exactModel, gatewayDirectory } from './gateway-directory.mjs'
+import { EFFORT_IDS } from '../src/catalog.js'
 import { readStoredKey } from './stored-key.mjs'
 
 const arg = name => {
@@ -21,21 +23,22 @@ const arg = name => {
   if (value === undefined || value.startsWith('--')) throw new Error(`${name} needs a value`)
   return value
 }
-const model = arg('--model') ?? 'gemini-3.8-flash'
+const model = exactModel(arg('--model'))
 const rounds = Number(arg('--rounds') ?? 1)
-const reasoningEffort = arg('--reasoning') ?? 'low'
-if (!['gemini-3.8-flash', 'gemini-4-argon'].includes(model)) throw new Error('choose a native Gemini catalog model')
+const reasoningEffort = arg('--reasoning')
 if (!Number.isInteger(rounds) || rounds < 1 || rounds > 5) throw new Error('--rounds must be 1..5')
-if (!['low', 'medium', 'high'].includes(reasoningEffort)) throw new Error('--reasoning must be low, medium or high')
+if (reasoningEffort !== undefined && !EFFORT_IDS.includes(reasoningEffort)) throw new Error('--reasoning must be low, medium or high')
 const key = await readStoredKey({ label: arg('--key-label') })
-const mask = value => String(value).split(key).join(`…${key.slice(-4)}`)
+const mask = value => String(value).split(key).join('[redacted]')
 let record
 const ring = new ApophisCodeKeyRing({
   readRecord: async () => record,
   modifyRecord: async (_id, mutate) => { record = await mutate(record) ?? record; return record },
 })
 await ring.add(key, 'live check')
+const groups = gatewayDirectory(ring)
 const adapter = createRouteAdapter({
+  availableModels: groups.availableModels,
   ring, fallbackSessionId: 'gemini-tool-live-check',
   keys: { active: () => ring.activeKey(), forRequest: (_model, token) => token, onKeyFailure: kind => console.log(`key failure: ${kind}`) },
 })
@@ -49,7 +52,7 @@ globalThis.fetch = async (input, init) => {
   const request = new Request(input, init)
   const url = new URL(request.url)
   let isReplay = false
-  if (request.method === 'POST' && url.pathname === `/v1beta/models/${model}:streamGenerateContent`) {
+  if (request.method === 'POST' && url.pathname === `/v1beta/models/${encodeURIComponent(model)}:streamGenerateContent`) {
     const body = await request.clone().json()
     isReplay = body.contents?.some(content => content.parts?.some(part => part.functionResponse)) ?? false
     if (isReplay) replayHashes.push(createHash('sha256').update(JSON.stringify(body)).digest('hex'))
@@ -68,7 +71,7 @@ const turn = async messages => {
   return assembled
 }
 try {
-  console.log(`${model} · ${reasoningEffort} · stored key …${key.slice(-4)}`)
+  console.log(`${model} · ${reasoningEffort} · plugin-owned stored key`)
   let passed = 0
   for (let round = 1; round <= rounds; round += 1) {
     console.log(`round ${round}: tool call`)

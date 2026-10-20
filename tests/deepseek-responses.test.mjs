@@ -63,7 +63,7 @@ for (const [reasoningEffort, wireEffort] of [['low', 'low'], ['off', 'none']]) {
         assert.equal(call.body.reasoning_effort, undefined)
         assert.equal(call.body.max_tokens, undefined)
         assert.equal(call.body.max_output_tokens, 2048)
-        assert.equal(call.body.prompt_cache_key, undefined)
+        assert.equal(call.body.prompt_cache_key, 'plugin-host-fixture-session')
         assert.equal(call.body.prompt_cache_retention, undefined)
         assert.equal(call.body.input[0].role, 'developer')
         assert.equal(call.body.tools[0].type, 'function')

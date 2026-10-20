@@ -1,5 +1,5 @@
 /**
- * Web search wiring: the two search providers, the user's routing and backend
+ * Web search wiring: the two search providers, the user's routing and model
  * preference, the profile-patch entry that makes DSH reach them, and the
  * projection the settings panel reads.
  *
@@ -9,11 +9,8 @@
 import {
   createApophisCodeAutoSearchProvider,
   createApophisCodeSearchProvider,
-  DEFAULT_SEARCH_BACKEND,
   APOPHISCODE_AUTO_SEARCH_PROVIDER_ID,
   APOPHISCODE_SEARCH_PROVIDER_ID,
-  SEARCH_BACKEND_MODELS,
-  SEARCH_BACKENDS,
   SEARCH_MODE_AUTO,
   SEARCH_MODE_DEFAULT,
   SEARCH_MODE_APOPHISCODE,
@@ -28,10 +25,9 @@ const FOREIGN_ROUTERS = Object.freeze({ codex: 'codex-subscription-auto', kimi: 
 /** Normalize a stored preference; anything unknown reads as the default. */
 export function readSearchChoice(value) {
   const provider = fieldValue(value?.searchProvider)
-  const selectedBackend = fieldValue(value?.searchBackend)
+  const selectedModel = fieldValue(value?.searchModel)
   const mode = SEARCH_MODES.includes(provider) ? provider : SEARCH_MODE_DEFAULT
-  const backend = SEARCH_BACKENDS.includes(selectedBackend) ? selectedBackend : DEFAULT_SEARCH_BACKEND
-  return { mode, backend }
+  return { mode, model: typeof selectedModel === 'string' ? selectedModel : '' }
 }
 
 /** Only sentences this plugin wrote reach the browser. */
@@ -42,7 +38,7 @@ function safeMessage(error) {
 
 /**
  * @param options - the key ring and hosts the search runs with, the key-failure
- *   sink and group coverage shared with the model route, the preference reader
+ *   sink shared with the model route, the active-key directory, the preference reader
  *   and writer, the initiating session's provider and id, the web row's Loader
  *   entry, the profile-patch composition, a logger, and an optional fetch.
  */
@@ -50,7 +46,6 @@ export function createSearchController({
   ring,
   hosts,
   onKeyFailure,
-  covers,
   readPreference,
   writePreference,
   isWritable = () => typeof writePreference === 'function',
@@ -60,6 +55,8 @@ export function createSearchController({
   composition,
   logger,
   fetchImpl,
+  availableModels = async () => [],
+  protocols,
 }) {
   let web
   let fallbackId
@@ -71,9 +68,9 @@ export function createSearchController({
   const apophiscode = createApophisCodeSearchProvider({
     ring,
     hosts,
-    backend: () => preference().backend,
+    selectedModel: () => preference().model,
+    availableModels, protocols,
     onKeyFailure,
-    covers,
     resolveSessionId,
     ...(fetchImpl === undefined ? {} : { fetchImpl }),
   })
@@ -115,17 +112,21 @@ export function createSearchController({
     return next
   }
 
-  const status = () => {
-    const { mode, backend } = preference()
+  const status = async () => {
+    const { mode, model } = preference()
+    let models = [], modelError
+    try { models = await availableModels() }
+    catch { modelError = 'ApophisCode search model list could not be read; check the active key and gateway' }
     const entry = webEntry()
     const base = entry?.options?.config?.searchProvider
     const runtime = entry?.fiber?.config?.searchProvider
     return {
       searchProvider: mode,
-      searchBackend: backend,
+      searchModel: model,
       writable: isWritable() === true,
       available: web !== undefined,
-      models: { ...SEARCH_BACKEND_MODELS },
+      models: models.map(row => ({ id: row.id })),
+      ...(modelError === undefined ? {} : { modelError }),
       effective: {
         ...(typeof base === 'string' ? { base } : {}),
         ...(typeof runtime === 'string' ? { runtime } : {}),
@@ -165,9 +166,9 @@ export function createSearchController({
         if (!SEARCH_MODES.includes(patch.searchProvider)) throw new Error('That ApophisCode search option is not supported')
         next.searchProvider = patch.searchProvider
       }
-      if (patch?.searchBackend !== undefined) {
-        if (!SEARCH_BACKENDS.includes(patch.searchBackend)) throw new Error('That ApophisCode search backend is not supported')
-        next.searchBackend = patch.searchBackend
+      if (patch?.searchModel !== undefined) {
+        if (patch.searchModel !== '' && !(await availableModels()).some(row => row.id === patch.searchModel)) throw new Error('ApophisCode search model is absent from the active key model list')
+        next.searchModel = patch.searchModel
       }
       if (Object.keys(next).length === 0) return status()
       if (isWritable() !== true || typeof writePreference !== 'function') {

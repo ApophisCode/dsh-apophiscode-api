@@ -6,8 +6,8 @@ import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import { createVisionFixture } from '../scripts/vision-fixture.mjs'
 import { nativeStream, TEXT_SIGNATURE, TOOL_SIGNATURE } from './fixtures/gemini.mjs'
 import { ApophisCodeKeyRing } from '../src/key-ring.js'
-import { createApophisCodeProvider } from '../src/provider.js'
-import { createRouteAdapter } from '../src/route.js'
+import { createApophisCodeProvider } from './fixtures/declared-gateway.mjs'
+import { createRouteAdapter } from './fixtures/declared-gateway.mjs'
 import { fakeCredentials, hostProvider } from './helpers.mjs'
 
 const KEY = 'sk-fixture-only-not-a-real-key'
@@ -58,7 +58,7 @@ for (const id of ['gemini-4-argon', 'gemini-3.8-flash']) {
     assert.equal(requests.length, 3)
   })
 
-  test(`${id} defaults to medium and preserves an async payload hook after level normalization`, async t => {
+  test(`${id} leaves reasoning to the server and preserves an async payload hook`, async t => {
     const requests = capture(t)
     const provider = hostProvider(createApophisCodeProvider())
     const model = provider.getModels().find(model => model.id === id)
@@ -68,8 +68,7 @@ for (const id of ['gemini-4-argon', 'gemini-3.8-flash']) {
       onPayload: async (payload, descriptor) => {
         callbacks += 1
         assert.equal(descriptor.id, model.id)
-        assert.equal(payload.config.thinkingConfig.thinkingLevel, 'MEDIUM')
-        assert.equal(payload.config.thinkingConfig.thinkingBudget, undefined)
+        assert.equal(payload.config.thinkingConfig, undefined)
         return { ...payload, config: { ...payload.config, maxOutputTokens: 512 } }
       },
     }).result()

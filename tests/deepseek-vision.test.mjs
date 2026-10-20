@@ -5,7 +5,7 @@ import { createUserMessage } from '@deepseek-ai/dsh-llm'
 
 import { createVisionFixture } from '../scripts/vision-fixture.mjs'
 import { ApophisCodeKeyRing } from '../src/key-ring.js'
-import { createRouteAdapter } from '../src/route.js'
+import { createRouteAdapter } from './fixtures/declared-gateway.mjs'
 import { fakeCredentials } from './helpers.mjs'
 import { eventStream, responseFrames } from './fixtures/openai.mjs'
 

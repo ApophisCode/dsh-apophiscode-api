@@ -5,29 +5,26 @@ import { pathToFileURL } from 'node:url'
 import { Context } from '@deepseek-ai/cordis'
 import { BlockAssembler, createToolResultMessage, createUserMessage } from '@deepseek-ai/dsh-llm'
 import { ToolRuntime } from '@deepseek-ai/dsh-tools'
-import { getSupportedThinkingLevels } from '@earendil-works/pi-ai'
 
 import { apply, DEFAULT_API_HOST, normalizeHost } from '../lib/index.js'
-import { createApophisCodeCatalog } from '../src/catalog.js'
+import { EFFORT_IDS } from '../src/catalog.js'
+import { exactModel } from './gateway-directory.mjs'
 import { redactSecrets } from '../src/secret-redactor.js'
 import { readStoredKey } from './stored-key.mjs'
 
 const PROVIDER = 'apophiscode'
 const TOOL_NAME = 'read_fixture_record'
-const MODEL_METADATA = createApophisCodeCatalog(undefined, { includeLegacy: true })
 const HELP = `Run one real two-request tool check using a key stored under Settings → ApophisCode.
 The key is copied to memory; the script never changes stored credentials or DSH state.
 The only executable tool reads one in-memory test record. API requests may consume quota.
 
 Usage: node scripts/tool-check.mjs --model MODEL [options]
-  --model MODEL        One exact catalog model ID (required; no automatic scan)
-  --reasoning LEVEL    A supported effort (default: low when supported, otherwise high)
+  --model MODEL        One exact active-key model ID (required; no automatic scan)
+  --reasoning LEVEL    Explicit gateway-declared effort (omitted: gateway default)
   --key-label LABEL    Select one enabled plugin-owned key; otherwise use the active key
   --api-host ROOT      Explicit gateway root (default: ${DEFAULT_API_HOST})
   --timeout-ms MS      Timeout for each model request, 1000–300000 (default: 65000)
-  --help              Show help without reading a credential
-
-Known metadata IDs (not a live availability list): ${MODEL_METADATA.map(model => model.id).join(', ')}`
+  --help              Show help without reading a credential`
 
 /** Parse and validate every argument before any credential read or model request. */
 export function parseToolCheckArgs(args) {
@@ -44,11 +41,9 @@ export function parseToolCheckArgs(args) {
     if (value === undefined || value.startsWith('--') || value.trim() === '') throw new Error('Each tool-check option needs a value')
     values.set(name, value)
   }
-  const model = values.get('--model')
-  const descriptor = MODEL_METADATA.find(entry => entry.id === model)
-  if (descriptor === undefined) throw new Error('--model needs one exact catalog model ID; use --help')
-  const reasoning = values.get('--reasoning') ?? (getSupportedThinkingLevels(descriptor).includes('low') ? 'low' : 'high')
-  if (!getSupportedThinkingLevels(descriptor).includes(reasoning)) throw new Error('The selected model does not support that reasoning level')
+  const model = exactModel(values.get('--model'))
+  const reasoning = values.get('--reasoning')
+  if (reasoning !== undefined && !EFFORT_IDS.includes(reasoning)) throw new Error('Unknown reasoning effort')
   const timeoutMs = Number(values.get('--timeout-ms') ?? 65_000)
   if (!Number.isInteger(timeoutMs) || timeoutMs < 1000 || timeoutMs > 300_000) throw new Error('--timeout-ms must be an integer between 1000 and 300000')
   const apiHost = values.get('--api-host') ?? DEFAULT_API_HOST
@@ -149,11 +144,10 @@ export async function createToolCheck({ key, apiHost = DEFAULT_API_HOST, timeout
   return {
     close,
     async run({ model, reasoning }) {
-      const descriptor = MODEL_METADATA.find(entry => entry.id === model)
-      if (descriptor === undefined) throw new Error('Unsupported model or reasoning level')
-      reasoning ??= getSupportedThinkingLevels(descriptor).includes('low') ? 'low' : 'high'
-      if (!getSupportedThinkingLevels(descriptor).includes(reasoning)) throw new Error('Unsupported model or reasoning level')
-      const outcome = { model, api: descriptor.api, target, reasoning, ok: false, modelTurns: 0, executions: 0 }
+      exactModel(model)
+      const descriptor = await adapter.resolveModel(PROVIDER, model)
+      if (reasoning !== undefined && !descriptor.reasoning?.efforts.some(entry => entry.id === reasoning)) throw new Error('The gateway has not declared this reasoning effort')
+      const outcome = { model, target, reasoning, ok: false, modelTurns: 0, executions: 0 }
       const startExecutions = executions
       const fail = (message, code = 'TOOL_CHECK') => { throw Object.assign(new Error(message), { code }) }
       const requireFinish = (assembled, expected) => {

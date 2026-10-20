@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { createApophisCodeProvider } from '../src/provider.js'
+import { createApophisCodeProvider } from './fixtures/declared-gateway.mjs'
 import { hostProvider } from './helpers.mjs'
 
 /** An actual Responses SSE stream, parsed by pi-ai's real OpenAI SDK path. */
@@ -20,7 +20,7 @@ function responseStream() {
   })
 }
 
-test('Grok uses Responses and its four efforts without the cache key this gateway rejects', async () => {
+test('Responses encoding follows explicit efforts without a family-specific cache rule', async () => {
   const provider = hostProvider(createApophisCodeProvider())
   const model = provider.getModels().find(model => model.id === 'grok-4.7')
   for (const reasoning of ['low', 'medium', 'high', 'xhigh']) {
@@ -30,9 +30,6 @@ test('Grok uses Responses and its four efforts without the cache key this gatewa
       sessionId: 'grok-fixture-session', cacheRetention: 'long', maxTokens: 2048,
       fetch: async (url, init) => {
         requests.push({ url: String(url), key: new Headers(init.headers).get('authorization'), body: JSON.parse(init.body) })
-        if (requests.at(-1).body.prompt_cache_key !== undefined) {
-          return Response.json({ error: { message: 'Incorrect API key provided', type: 'gateway_invalid-argument', code: 'invalid-argument' } }, { status: 400 })
-        }
         return responseStream()
       },
     })
@@ -46,8 +43,8 @@ test('Grok uses Responses and its four efforts without the cache key this gatewa
     assert.equal(requests[0].key, 'Bearer sk-fixture-only-not-a-real-key')
     assert.equal(requests[0].body.model, 'grok-4.7')
     assert.equal(requests[0].body.reasoning.effort, reasoning)
-    assert.equal(requests[0].body.prompt_cache_key, undefined, 'the gateway refuses Grok when this field is present')
-    assert.equal(requests[0].body.prompt_cache_retention, undefined, 'Grok must not receive OpenAI 24h retention')
+    assert.equal(requests[0].body.prompt_cache_key, 'grok-fixture-session')
+    assert.equal(requests[0].body.prompt_cache_retention, '24h', 'explicit retention is preserved uniformly')
     assert.equal(requests[0].body.max_output_tokens, 2048)
     assert.ok(requests[0].body.include.includes('reasoning.encrypted_content'))
   }
@@ -65,7 +62,7 @@ test('GPT keeps the session cache key its gateway route requires', async () => {
   assert.equal(payload.prompt_cache_key, 'gpt-session')
 })
 
-test('a future non-GPT Responses model also defaults to omitting the GPT cache key', async () => {
+test('a new exact Responses ID receives the same session options', async () => {
   const provider = hostProvider(createApophisCodeProvider())
   // A descriptor from another family catches a Grok-only special case.
   const model = { ...provider.getModels().find(model => model.id === 'grok-4.7'), id: 'another-responses-model', name: 'Another model' }
@@ -75,5 +72,19 @@ test('a future non-GPT Responses model also defaults to omitting the GPT cache k
     fetch: async (_url, init) => { payload = JSON.parse(init.body); return responseStream() },
   })
   assert.equal((await stream.result()).stopReason, 'stop')
-  assert.equal(payload.prompt_cache_key, undefined)
+  assert.equal(payload.prompt_cache_key, 'other-session')
+})
+
+// Keep the known gateway rejection visible; do not restore a name-based workaround.
+test('a gateway cache-parameter rejection fails once without changing the model or protocol', async () => {
+  const provider = hostProvider(createApophisCodeProvider())
+  const model = provider.getModels().find(model => model.id === 'grok-4.7')
+  let calls = 0
+  const result = await provider.streamSimple(model, { messages: [{ role: 'user', content: 'q', timestamp: 1 }] }, {
+    apiKey: 'sk-fixture-only-not-a-real-key', sessionId: 'session',
+    fetch: async () => { calls += 1; return Response.json({ error: { message: 'Incorrect API key provided', code: 'invalid-argument' } }, { status: 400 }) },
+  }).result()
+  assert.equal(result.stopReason, 'error')
+  assert.match(result.errorMessage, /Incorrect API key/u)
+  assert.equal(calls, 1)
 })

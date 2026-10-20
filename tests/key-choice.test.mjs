@@ -3,7 +3,7 @@ import test from 'node:test'
 
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 
-import { APOPHISCODE_MODEL_IDS } from '../src/catalog.js'
+import { modelRow, APOPHISCODE_MODEL_IDS } from './fixtures/declared-gateway.mjs'
 import { apply } from '../src/index.js'
 import { fakeCredentials } from './helpers.mjs'
 import { anthropicStream } from './fixtures/anthropic.mjs'
@@ -36,7 +36,7 @@ function fakeGateway() {
       return anthropicStream(body.model)
     }
     if (url.endsWith('/api/v1/model-plaza')) return Response.json(PLAZA)
-    if (url.endsWith('/v1/models')) { probes.push(key); return Response.json({ data: (MODELS[key] ?? []).map(id => ({ id })) }) }
+    if (url.endsWith('/v1/models')) { probes.push(key); return Response.json({ data: (MODELS[key] ?? []).map(modelRow) }) }
     if (url.endsWith('/v1/responses')) {
       const body = JSON.parse(typeof init.body === 'string' ? init.body : await new Response(init.body).text())
       chatKeys.push(key)
@@ -83,7 +83,7 @@ const turn = async (adapter, model) => {
   return chunks
 }
 
-test('an HTTP turn runs on a key whose model list includes its model, without moving the active key', async t => {
+test('an HTTP turn rejects an absent active-key model without scanning other keys', async t => {
   const gateway = fakeGateway()
   t.after(gateway.restore)
   const { ctx, seen } = context()
@@ -91,11 +91,9 @@ test('an HTTP turn runs on a key whose model list includes its model, without mo
   await seen.handler('keys/add', { key: KEY_CODEX, label: 'codex' })
   await seen.handler('keys/add', { key: KEY_DEEPSEEK, label: 'deepseek' })
 
-  const chunks = await turn(seen.adapter, 'deepseek-v4.1-flash')
-  assert.equal(chunks.at(-1).type, 'finish')
-  assert.equal(chunks.at(-1).reason.kind, 'stop')
-  // The active key (codex) has no DeepSeek group; the DeepSeek key served it.
-  assert.deepEqual(gateway.chatKeys, [KEY_DEEPSEEK])
+  await assert.rejects(turn(seen.adapter, 'deepseek-v4.1-flash'), /absent from the active key/u)
+  assert.deepEqual(gateway.chatKeys, [])
+  assert.deepEqual(gateway.probes, [KEY_CODEX])
   const status = await seen.handler('status', {})
   assert.equal(status.value.keys.find(key => key.active).label, 'codex')
 
@@ -108,7 +106,7 @@ test('an HTTP turn runs on a key whose model list includes its model, without mo
   assert.doesNotMatch(JSON.stringify(groups), /sk-(codex|deepseek)/u)
 })
 
-test('listing models reads only the active plugin key; request key choice still uses verified coverage', async t => {
+test('listing and invoking models read only the active plugin key', async t => {
   const gateway = fakeGateway()
   t.after(gateway.restore)
   const { ctx, seen } = context()
@@ -120,13 +118,12 @@ test('listing models reads only the active plugin key; request key choice still 
   assert.deepEqual((await seen.adapter.listModels('apophiscode')).map(model => model.id), ['gpt-6.1-sol'])
   assert.deepEqual(gateway.probes, [KEY_CODEX])
 
-  const chunks = await turn(seen.adapter, 'deepseek-v4.1-flash')
-  assert.equal(chunks.at(-1).reason.kind, 'stop')
-  assert.deepEqual(gateway.chatKeys, [KEY_DEEPSEEK])
-  assert.deepEqual(gateway.probes.toSorted(), [KEY_CODEX, KEY_DEEPSEEK].toSorted())
+  await assert.rejects(turn(seen.adapter, 'deepseek-v4.1-flash'), /absent from the active key/u)
+  assert.deepEqual(gateway.chatKeys, [])
+  assert.deepEqual(gateway.probes, [KEY_CODEX])
 })
 
-test('a native Claude turn after "use this key" uses that key, otherwise one with Claude coverage', async t => {
+test('switching to a Messages key changes invocation credentials without implicit coverage selection', async t => {
   const gateway = fakeGateway()
   t.after(gateway.restore)
   const { ctx, seen } = context()
@@ -136,10 +133,8 @@ test('a native Claude turn after "use this key" uses that key, otherwise one wit
   await seen.handler('keys/add', { key: KEY_CODEX, label: 'codex' })
   await seen.handler('keys/add', { key: KEY_CLAUDE, label: 'claude' })
 
-  // Active key without Claude coverage: the native bearer uses the cc key.
-  const passedOver = await turn(seen.adapter, 'claude-opus-5-5')
-  assert.equal(passedOver.at(-1).reason.kind, 'stop')
-  assert.deepEqual(gateway.chatKeys, [KEY_CLAUDE])
+  await assert.rejects(turn(seen.adapter, 'claude-opus-5-5'), /absent from the active key/u)
+  assert.deepEqual(gateway.chatKeys, [])
 
   // "Use this key" on the cc key: the very next run uses it, named plainly.
   const status = await seen.handler('status', {})
@@ -147,10 +142,10 @@ test('a native Claude turn after "use this key" uses that key, otherwise one wit
   const selected = await turn(seen.adapter, 'claude-opus-5-5')
   assert.equal(selected.at(-1).reason.kind, 'stop')
 
-  assert.deepEqual(gateway.chatKeys, [KEY_CLAUDE, KEY_CLAUDE])
+  assert.deepEqual(gateway.chatKeys, [KEY_CLAUDE])
 })
 
-test('failed model discovery stays unknown and does not stop an active-key HTTP turn', async t => {
+test('failed active-key discovery is explicit and sends no business POST', async t => {
   const original = globalThis.fetch
   const seenKeys = []
   globalThis.fetch = async (input, init = {}) => {
@@ -168,6 +163,6 @@ test('failed model discovery stays unknown and does not stop an active-key HTTP 
   const groups = await seen.handler('groups', {})
   assert.deepEqual(groups.value.keys[0].coverage, {})
   assert.match(groups.value.keys[0].error, /unrecognized/u)
-  assert.equal((await turn(seen.adapter, 'claude-opus-5-5')).at(-1).reason.kind, 'stop')
-  assert.deepEqual(seenKeys, [`Bearer ${KEY_CLAUDE}`])
+  await assert.rejects(turn(seen.adapter, 'claude-opus-5-5'), /unrecognized model list/u)
+  assert.deepEqual(seenKeys, [])
 })

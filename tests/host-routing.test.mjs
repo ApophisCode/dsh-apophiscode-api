@@ -1,3 +1,4 @@
+import { MODEL_ROWS, modelRow } from './fixtures/declared-gateway.mjs'
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
@@ -5,8 +6,8 @@ import { Context } from '@deepseek-ai/cordis'
 import { credentialKey } from '@deepseek-ai/dsh-credentials'
 import { LlmAdapter, LlmRuntime } from '@deepseek-ai/dsh-llm'
 
-import { createApophisCodeCatalog, APOPHISCODE_MODELS, APOPHISCODE_MODEL_IDS } from '../src/catalog.js'
-import { DEFAULT_REASONING_LEVEL } from '../src/constants.js'
+import { createApophisCodeCatalog, APOPHISCODE_MODELS, APOPHISCODE_MODEL_IDS } from './fixtures/declared-gateway.mjs'
+const DEFAULT_REASONING_LEVEL = undefined
 import { apply } from '../src/index.js'
 import { singleKeyRecord } from './helpers.mjs'
 import { anthropicStream } from './fixtures/anthropic.mjs'
@@ -113,7 +114,7 @@ function capture(t, respond = call => answered(call.model)) {
   t.mock.method(globalThis, 'fetch', async (input, init) => {
     const request = new Request(input, init)
     if (request.method === 'GET') return new URL(request.url).pathname.endsWith('/v1/models')
-      ? Response.json({ data: APOPHISCODE_MODEL_IDS.map(id => ({ id })) })
+      ? Response.json({ data: MODEL_ROWS })
       : Response.json({ code: 0, data: { groups: [] } })
     const body = await request.json()
     const model = body.model ?? new URL(request.url).pathname.match(/\/models\/([^:]+)/u)?.[1]
@@ -143,9 +144,9 @@ for (const suffix of ['', '/v1/', '/v1beta/']) {
     const requests = capture(t)
     const root = 'https://relay.example/gateway'
     const { adapter, handler } = host({ apiHost: `${root}${suffix}` })
-    assert.deepEqual((await adapter.listModels(PROVIDER)).map(model => model.id), [...APOPHISCODE_MODEL_IDS])
-    assert.deepEqual((await handler('models/status')).value.models.map(model => model.id), [...APOPHISCODE_MODEL_IDS])
-    for (const model of APOPHISCODE_MODEL_IDS) {
+    assert.deepEqual((await adapter.listModels(PROVIDER)).map(model => model.id), MODEL_ROWS.map(row => row.id))
+    assert.deepEqual((await handler('models/status')).value.models.map(model => model.id), MODEL_ROWS.map(row => row.id))
+    for (const model of MODEL_ROWS.map(row => row.id)) {
       const resolved = await adapter.resolveModel(PROVIDER, model)
       const prepared = await adapter.prepareCall(PROVIDER, model)
       assert.deepEqual(prepared.model, resolved)
@@ -153,7 +154,7 @@ for (const suffix of ['', '/v1/', '/v1beta/']) {
       await drain(prepared.stream(options(model)))
       assertDestination(requests.at(-1), root, model)
     }
-    assert.equal(requests.length, APOPHISCODE_MODEL_IDS.length)
+    assert.equal(requests.length, MODEL_ROWS.length)
   })
 }
 
@@ -180,7 +181,7 @@ for (const model of ['deepseek-v4.1-flash', 'gpt-6-astra', 'claude-sonnet-5-5', 
     assertDestination(requests.at(-1), 'https://second.example/proxy', model)
 
     if (model === 'gpt-6-astra' || model === 'claude-sonnet-5-5') {
-      const title = model === 'gpt-6-astra' ? 'gpt-6.1-sol' : model
+      const title = model
       await drain(old.stream(options(model, { purpose: 'session-title' })))
       assertDestination(requests.at(-1), 'https://first.example/gateway', title)
     }
@@ -231,8 +232,8 @@ test('hiding every model affects discovery while an existing session can still r
   await drain(prepared.stream(options(model)))
   await drain((await adapter.prepareCall(PROVIDER, model)).stream(options(model)))
   assert.equal(requests.length, 2)
-  assert.ok((await handler('models/update', { selectedIds: [...APOPHISCODE_MODEL_IDS] })).value.models.every(model => model.selected))
-  assert.deepEqual((await adapter.listModels(PROVIDER)).map(model => model.id), [...APOPHISCODE_MODEL_IDS])
+  assert.ok((await handler('models/update', { selectedIds: MODEL_ROWS.map(row => row.id) })).value.models.every(model => model.selected))
+  assert.deepEqual((await adapter.listModels(PROVIDER)).map(model => model.id), MODEL_ROWS.map(row => row.id))
 })
 
 test('the real DSH registry keeps another provider route and prepared session separate from Apophis', async t => {

@@ -21,7 +21,7 @@ import z from '@deepseek-ai/schemastery'
 import { createBalanceReader } from './balance.js'
 import { createClaudeCliManager } from './claude-install.js'
 import { createClaudeCliTransport } from './claude-cli-transport.js'
-import { CLAUDE_TRANSPORTS, claudeTransportFor, DEFAULT_CLAUDE_TRANSPORT, isClaudeModel, readClaudeTransport } from './claude-transport.js'
+import { CLAUDE_TRANSPORTS, claudeTransportFor, DEFAULT_CLAUDE_TRANSPORT, readClaudeTransport } from './claude-transport.js'
 import {
   CHANNEL,
   DEFAULT_API_HOST,
@@ -34,7 +34,6 @@ import {
 } from './constants.js'
 import { createDiagnostics } from './diagnostics.js'
 import { createGroupReader } from './groups.js'
-import { DEFAULT_IMAGE_MODEL, IMAGE_MODEL_IDS, IMAGE_QUALITIES } from './image-models.js'
 import { createImageController } from './image-settings.js'
 import { createImageOriginalReader } from './image-originals.js'
 import { createApophisCodeImageClient, createApophisCodeImageTool } from './images.js'
@@ -45,8 +44,9 @@ import { createModelSelectionController } from './model-selection.js'
 import { createApophisCodePluginManager } from './plugin-version.js'
 import { connectSettings, fieldValue, live, unwritable } from './preferences.js'
 import { createRouteAdapter } from './route.js'
+import { createModelProtocolResolver } from './model-protocol.js'
 import { createApophisCodeRpc } from './rpc.js'
-import { DEFAULT_SEARCH_BACKEND, SEARCH_BACKENDS, SEARCH_MODE_DEFAULT, SEARCH_MODES } from './search.js'
+import { SEARCH_MODE_DEFAULT, SEARCH_MODES } from './search.js'
 import { createProfileSearchComposition } from './search-composition.js'
 import { createSearchController } from './search-controller.js'
 
@@ -69,17 +69,16 @@ export const Config = z.object({
    * request DSH's own search would have served.
    */
   searchProvider: live(z.union([...SEARCH_MODES]).default(SEARCH_MODE_DEFAULT)),
-  /** Which ApophisCode model runs a search: `deepseek` or `gpt`. */
-  searchBackend: live(z.union([...SEARCH_BACKENDS]).default(DEFAULT_SEARCH_BACKEND)),
+  /** Exact active-key model ID; empty selects the first directory entry. */
+  searchModel: live(z.string().default('')),
   /** Only the picker is filtered; an existing session can keep its model. */
   hiddenModels: live(z.array(z.string()).default([])),
   imageEnabled: live(z.boolean().default(true)),
-  imageModel: live(z.union([...IMAGE_MODEL_IDS]).default(DEFAULT_IMAGE_MODEL)),
-  imageQuality: live(z.union([...IMAGE_QUALITIES]).default('auto')),
+  imageModel: live(z.string().default('')),
+  imageQuality: live(z.string().default('auto')),
   /**
-   * How Claude requests travel: `auto` sends a key in the `cc` group through
-   * the official Claude Code CLI and every other key over HTTP; `cli` and
-   * `http` pin one transport.
+   * Auto and http use HTTP. Only an explicit cli preference selects the
+   * isolated Claude Code transport; group membership never chooses it.
    */
   claudeTransport: live(z.union([...CLAUDE_TRANSPORTS]).default(DEFAULT_CLAUDE_TRANSPORT)),
   /** Path to the Claude Code CLI; empty means "the usual install places, then PATH". */
@@ -97,7 +96,7 @@ export function apply(ctx, config) {
     apiHost: normalizeHost(config?.apiHost, DEFAULT_API_HOST),
     statusHost: normalizeHost(config?.statusHost, DEFAULT_STATUS_HOST),
     searchProvider: fieldValue(config?.searchProvider),
-    searchBackend: fieldValue(config?.searchBackend),
+    searchModel: fieldValue(config?.searchModel),
     hiddenModels: fieldValue(config?.hiddenModels),
     imageEnabled: fieldValue(config?.imageEnabled),
     imageModel: fieldValue(config?.imageModel),
@@ -116,12 +115,12 @@ export function apply(ctx, config) {
   const balance = createBalanceReader({ listKeys: () => ring.secrets(), getHosts: hosts })
   const imageBalance = createBalanceReader({ listKeys: () => imageRing.secrets(), getHosts: hosts })
   /**
-   * Which token groups each key is in, and so which models it can reach.
-   * Nothing reads it at boot: the settings panel asks for it, and a request
-   * with a choice of keys waits briefly for the first reading.
+   * Read the active key's raw model directory on demand. Public group data
+   * remains separate and never selects a request credential or transport.
    */
   const groups = createGroupReader({ listKeys: () => ring.secrets(), getActiveKey: () => ring.activeKey(), getHosts: hosts })
-  const keys = createKeyChooser({ ring, groups, logger: ctx.logger, onRotated: () => { balance.invalidate(); modelSelection.refresh() } })
+  const protocols = createModelProtocolResolver()
+  const keys = createKeyChooser({ ring, logger: ctx.logger, onRotated: () => { balance.invalidate(); modelSelection.refresh() } })
 
   /** The session of the agent this turn runs for, when one is in scope. */
   const currentSession = () => {
@@ -162,9 +161,8 @@ export function apply(ctx, config) {
   // ── the Claude Code CLI transport ─────────────────────────────────────────
 
   /**
-   * Keys in a group that only serves the official client send their Claude
-   * requests through this device's Claude Code CLI. DSH's agent loop, tools,
-   * permissions and plan mode are unchanged; only the transport differs.
+   * Existing opt-in transport. Auto stays on HTTP; creating the manager does
+   * not install or launch a CLI. DSH retains tools, permissions and history.
    */
   const claudeCli = createClaudeCliManager({ explicitPath: () => fieldValue(source()?.claudeCliPath) })
   const cliTransport = createClaudeCliTransport({
@@ -192,11 +190,11 @@ export function apply(ctx, config) {
   // Every model runs DSH's native agent loop. Only an explicit preference
   // selects the Claude CLI; auto remains HTTP without probing group policy.
   const registration = ctx.llm.registerAdapter([PROVIDER], createRouteAdapter({
-    ring, keys, getApiHost: () => hosts().apiHost, fallbackSessionId, resolveAttachments: attachments,
-    isModelVisible: modelSelection.isVisible, availableModelIds: groups.availableModelIds,
+    ring, keys, protocols, getApiHost: () => hosts().apiHost, fallbackSessionId, resolveAttachments: attachments,
+    isModelVisible: modelSelection.isVisible, availableModelIds: groups.availableModelIds, availableModels: groups.availableModels,
     claudeCli: Object.freeze({
       followsGroups: () => false,
-      choose: ({ apiKey, model }) => isClaudeModel(model) && claudeTransportOf(keys.idOf(apiKey)).transport === 'cli',
+      choose: ({ apiKey }) => claudeTransportOf(keys.idOf(apiKey)).transport === 'cli',
       fetch: (input, init, meta) => cliTransport.fetch(input, init, meta),
     }),
     resolveWorkingDirectory: sessionId => {
@@ -227,19 +225,23 @@ export function apply(ctx, config) {
   const dshHome = typeof process.env.DSH_HOME === 'string' && process.env.DSH_HOME !== ''
     ? process.env.DSH_HOME
     : join(homedir(), '.dsh')
+  const imageGroups = createGroupReader({ listKeys: () => imageRing.secrets(), getActiveKey: () => imageRing.activeKey(), getHosts: hosts })
   const images = createImageController({
+    availableModels: imageGroups.availableModels,
+    invalidateModels: imageGroups.invalidate,
     ring: imageRing,
     balance: imageBalance,
     readPreference: () => source() ?? {},
     writePreference: patch => imagePreference.set(patch),
     isWritable: () => imagePreference.writable === true && typeof imagePreference.set === 'function',
   })
-  const imageClient = createApophisCodeImageClient({ resolveKey: () => imageRing.activeKey(), getHost: () => hosts().apiHost })
+  const imageClient = createApophisCodeImageClient({ resolveKey: () => imageRing.activeKey(), getHost: () => hosts().apiHost, availableModels: imageGroups.availableModels })
   const search = createSearchController({
+    protocols,
+    availableModels: groups.availableModels,
     ring,
     hosts,
     onKeyFailure: keys.onKeyFailure,
-    covers: keys.covers,
     readPreference: () => source() ?? {},
     writePreference: patch => searchPreference.set(patch),
     isWritable: () => searchPreference.writable === true && typeof searchPreference.set === 'function',
@@ -274,6 +276,7 @@ export function apply(ctx, config) {
       balance.invalidate()
       imageBalance.invalidate()
       groups.invalidate()
+      imageGroups.invalidate()
       reconcileModelHost()
       modelSelection.reconcile()
       void images.reconcile().catch(() => undefined)
@@ -407,7 +410,7 @@ export { cliToolName, createClaudeToolNames } from './claude-tools.js'
 export { CLAUDE_TRANSPORTS, claudeTransportFor, CLI_ONLY_GROUPS, DEFAULT_CLAUDE_TRANSPORT, HTTP_CLAUDE_GROUPS, readClaudeTransport } from './claude-transport.js'
 export { createBalanceReader, parseTokenUsage } from './balance.js'
 export { normalizeHost, statusHostOrder } from './hosts.js'
-export { APOPHISCODE_MODELS, APOPHISCODE_MODEL_IDS } from './catalog.js'
+export { createApophisCodeCatalog } from './catalog.js'
 export {
   CHANNEL,
   DEFAULT_API_HOST,
@@ -437,7 +440,7 @@ export { createDiagnostics, DIAGNOSTICS_FORMAT, DIAGNOSTICS_LIMITS, summarizeSes
 export { catalogCoverage, createGroupReader, parseModelPlaza, parseKeyModels, pickKeyForModel } from './groups.js'
 export { createKeyChooser } from './key-chooser.js'
 export { createModelSelectionController, readHiddenModels } from './model-selection.js'
-export { DEFAULT_IMAGE_MODEL, IMAGE_MODELS, IMAGE_MODEL_IDS, IMAGE_QUALITIES, validateImageOptions } from './image-models.js'
+export { validateImageOptions } from './image-models.js'
 export { createImageController, readImagePreference } from './image-settings.js'
 export { createApophisCodeImageClient, createApophisCodeImageTool, decodeImagePng, IMAGE_TOOL_NAME, IMAGE_TIMEOUT_MS, MAX_IMAGE_BYTES, pngDimensions } from './images.js'
 export { assertApiKey, ApophisCodeKeyRing } from './key-ring.js'
@@ -448,13 +451,10 @@ export {
   buildSearchRequest,
   createApophisCodeAutoSearchProvider,
   createApophisCodeSearchProvider,
-  DEFAULT_SEARCH_BACKEND,
   APOPHISCODE_AUTO_SEARCH_PROVIDER_ID,
   APOPHISCODE_SEARCH_PROVIDER_ID,
   parseMessagesSearchResponse,
   parseResponsesSearchResponse,
-  SEARCH_BACKEND_MODELS,
-  SEARCH_BACKENDS,
   SEARCH_MODES,
 } from './search.js'
 export { createProfileSearchComposition, createSearchComposition } from './search-composition.js'

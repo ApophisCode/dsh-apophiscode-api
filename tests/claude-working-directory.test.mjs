@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
-import { createRouteAdapter } from '../src/route.js'
+import { createRouteAdapter } from './fixtures/declared-gateway.mjs'
 import { ApophisCodeKeyRing } from '../src/key-ring.js'
 import { fakeCredentials } from './helpers.mjs'
 import { anthropicStream } from './fixtures/anthropic.mjs'

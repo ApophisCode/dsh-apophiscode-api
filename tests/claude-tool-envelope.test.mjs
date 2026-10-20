@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { createApophisCodeProvider } from '../src/provider.js'
+import { createApophisCodeProvider } from './fixtures/declared-gateway.mjs'
 import { hostProvider } from './helpers.mjs'
 import { anthropicStream } from './fixtures/anthropic.mjs'
 
@@ -133,7 +133,7 @@ test('Haiku preserves SDK thinking and explicit payload display without imposing
   for (const display of [undefined, 'omitted']) await provider.streamSimple(model, { messages: [user] }, { apiKey: key, reasoning: 'high', maxTokens: 2048,
     onPayload: payload => display === undefined ? payload : { ...payload, thinking: { ...payload.thinking, display } },
   }).result()
-  assert.deepEqual(requests.map(body => body.thinking.display), ['summarized', 'omitted'])
+  assert.deepEqual(requests.map(body => body.thinking?.display), [undefined, 'omitted'])
   for (const body of requests) { assert.equal(body.output_config.effort, 'high'); assert.equal(body.max_tokens, 2048) }
 })
 
@@ -154,7 +154,7 @@ for (const id of ['claude-sonnet-5-5', 'claude-opus-5-5']) test(`${id} keeps SDK
   for (const display of [undefined, 'summarized']) await provider.streamSimple(model, { messages: [user] }, { apiKey: key, reasoning: 'low', maxTokens: 2048,
     onPayload: payload => display === undefined ? payload : { ...payload, thinking: { ...payload.thinking, display } },
   }).result()
-  assert.equal(requests[0].body.thinking.display, 'summarized', 'the SDK default remains intact')
+  assert.equal(requests[0].body.thinking, undefined, 'model-name defaults are not capability declarations')
   assert.equal(requests[0].headers.get('anthropic-beta')?.includes('thinking-display-updates-2026-08-18') ?? false, false)
   assert.equal(requests[1].body.thinking.display, 'summarized')
   assert.equal(requests[1].headers.get('anthropic-beta')?.includes('thinking-display-updates-2026-08-18') ?? false, false)

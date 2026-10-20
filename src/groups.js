@@ -7,7 +7,8 @@
  */
 
 import { createCachedRead } from './cached-read.js'
-import { APOPHISCODE_MODEL_IDS } from './catalog.js'
+import { createHash } from 'node:crypto'
+import { declaredMetadata } from './catalog.js'
 import { DEFAULT_REQUEST_TIMEOUT_MS } from './constants.js'
 import { apiRootHost, statusHostOrder } from './hosts.js'
 import { ambientFetch, boundedFetch } from './request.js'
@@ -39,7 +40,7 @@ class RejectedKeyError extends Error {
 /** Normalize public group IDs separately from their Unicode display names. */
 export function parseModelPlaza(payload) {
   if (!record(payload) || payload.code !== 0 || !Array.isArray(payload.data?.groups)) return undefined
-  const modelGroups = {}, descriptions = {}, groups = []
+  const modelGroups = Object.create(null), descriptions = {}, groups = []
   for (const item of payload.data.groups) {
     if (!record(item) || !Number.isSafeInteger(item.id) || item.id < 0 || !Array.isArray(item.models)) return undefined
     const name = cleanText(item.name, 120)
@@ -50,12 +51,11 @@ export function parseModelPlaza(payload) {
     descriptions[id] = description === '' ? name : `${name}: ${description}`
     for (const model of item.models) {
       if (!record(model) || typeof model.name !== 'string') return undefined
-      if (!APOPHISCODE_MODEL_IDS.includes(model.name)) continue
       const enabled = modelGroups[model.name] ??= []
       if (!enabled.includes(id)) enabled.push(id)
     }
   }
-  return { modelGroups, descriptions, groups }
+  return { modelGroups: { ...modelGroups }, descriptions, groups }
 }
 
 /** Recognize OpenAI and deployed Codex-style model lists, never an error body. */
@@ -68,7 +68,7 @@ export function parseKeyModels(payload) {
 
 /** Only this key's own model list supplies coverage evidence. */
 export function catalogCoverage({ models } = {}) {
-  return models === undefined ? {} : Object.fromEntries([...new Set([...APOPHISCODE_MODEL_IDS, ...models])].map(id => [id, models.has(id)]))
+  return models === undefined ? {} : Object.fromEntries([...models].map(id => [id, true]))
 }
 
 /** Cached, bounded GETs. Public directory failures never discard key evidence. */
@@ -108,11 +108,19 @@ export function createGroupReader({
     if (models === undefined) throw new Error('the gateway returned an unrecognized model list')
     const secrets = [...initialSecrets, ...(await listKeys()).map(item => item.key)]
     if (unsafeModels([...models], secrets)) throw new Error('the gateway returned unsafe model-list data')
-    return { id: entry.id, modelIds: [...models], coverage: catalogCoverage({ models }), membershipUnavailable: true, fetchedAt: now() }
+    const rows = Array.isArray(payload.data) ? payload.data : payload.models
+    // Only model metadata is retained here; this projection never returns an API key.
+    return { id: entry.id, modelIds: [...models], modelRows: rows.map(row => {
+      const metadata = declaredMetadata(row)
+      return { id: row.id, api: metadata.api, contextWindow: metadata.contextWindow, maxTokens: metadata.maxTokens,
+        input_modalities: metadata.input, reasoning_efforts: metadata.reasoningEfforts && Object.keys(metadata.reasoningEfforts),
+        ...(Array.isArray(row.image_qualities) && row.image_qualities.every(value => typeof value === 'string' && value.length < 40 && !secrets.some(key => value.includes(key)))
+          ? { image_qualities: row.image_qualities } : {}) }
+    }), coverage: catalogCoverage({ models }), membershipUnavailable: true, fetchedAt: now() }
   }
   const keyCaches = new Map()
   const keyReader = (entry, apiHost) => {
-    const identity = JSON.stringify([apiHost, entry.id])
+    const identity = JSON.stringify([apiHost, entry.id, createHash('sha256').update(entry.key).digest('hex')])
     let reader = keyCaches.get(identity)
     if (reader === undefined) {
       reader = createCachedRead(signal => readKey(entry, apiHost, signal), { ttlMs, now })
@@ -154,7 +162,7 @@ export function createGroupReader({
         const message = safe(error instanceof Error ? error.message : String(error))
         if (error instanceof RejectedKeyError) {
           lastGood.delete(entry.id)
-          return { id: entry.id, rejected: true, coverage: Object.fromEntries(APOPHISCODE_MODEL_IDS.map(id => [id, false])), error: message }
+          return { id: entry.id, rejected: true, coverage: {}, error: message }
         }
         const previous = lastGood.get(entry.id)
         return previous?.host === apiHost && !unsafeModels(previous.value.modelIds, secrets)
@@ -184,6 +192,17 @@ export function createGroupReader({
       return reading
     }, snapshot: () => cache.snapshot(),
     /** The active plugin key's raw IDs are the entire advertised directory. */
+    async availableModels({ entry, apiHost: target, signal } = {}) {
+      const active = entry ?? (getActiveKey === undefined ? (await listKeys()).find(item => item.disabled !== true) : await getActiveKey())
+      if (active === undefined || active.disabled === true) return []
+      const apiHost = apiRootHost(target ?? getHosts().apiHost)
+      const value = await keyReader(active, apiHost).read({ signal })
+      const secrets = (await listKeys()).map(item => item.key)
+      if (unsafeModels(value.modelIds, secrets) || value.modelRows.some(row => row.image_qualities?.some(quality => secrets.some(key => quality.includes(key))))) {
+        throw new Error('ApophisCode refused unsafe model-list data')
+      }
+      return value.modelRows
+    },
     async availableModelIds() {
       const active = getActiveKey === undefined ? (await listKeys()).find(entry => entry.disabled !== true) : await getActiveKey()
       if (active === undefined || active.disabled === true) return new Set()

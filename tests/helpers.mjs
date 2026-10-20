@@ -2,6 +2,7 @@
  * Test doubles shared across the suite.
  */
 
+import { credentialKey } from '@deepseek-ai/dsh-credentials'
 import * as piAi from '@earendil-works/pi-ai'
 
 /**
@@ -51,24 +52,25 @@ function assertJsonValue(where, value, seen) {
  *   test-only view of the stored grant payload.
  */
 export function fakeCredentials({ record: initial } = {}) {
-  let record = initial
+  const primary = credentialKey('apophiscode-api', 'keys')
+  const records = new Map(initial === undefined ? [] : [[primary, initial]])
   let chain = Promise.resolve()
   return {
-    async readRecord() {
-      return record
+    async readRecord(key) {
+      return records.get(key)
     },
     modifyRecord(key, mutate) {
       const run = chain.then(async () => {
-        const next = await mutate(record)
+        const next = await mutate(records.get(key))
         if (next?.kind === 'grant') assertJsonValue(`record "${key}" payload`, next.payload, new Set())
-        if (next !== undefined) record = next
-        return record
+        if (next !== undefined) records.set(key, next)
+        return records.get(key)
       })
       chain = run.then(() => undefined, () => undefined)
       return run
     },
     payload() {
-      return record?.payload
+      return records.get(primary)?.payload
     },
   }
 }

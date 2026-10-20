@@ -18,6 +18,19 @@ export function readTime(ms) {
 
 const RESET_KEYS = { monthly: 'resetMonthly', weekly: 'resetWeekly', daily: 'resetDaily', never: 'resetNever' }
 
+/** Translate only reader-authored failures; keep other safe causes explicit. */
+export function balanceFailureCopy(message, t) {
+  if (message === 'the gateway returned unreadable balance data') return t('balanceUnreadable')
+  if (message === 'the gateway returned an unrecognized usage payload') return t('balanceUnrecognized')
+  if (message === 'this API key was rejected (401)') return t('balanceRejected')
+  if (message === "the gateway refused this key's balance read (402/403)") return t('balanceForbidden')
+  if (message === 'the gateway is rate limiting balance reads (429)') return t('balanceRateLimited')
+  if (/^no answer within \d+s$/u.test(message)) return t('balanceTimeout')
+  if (/^fetch failed(?: \([A-Z0-9_]+\))?$/u.test(message)) return t('balanceNetwork')
+  const http = /^the gateway answered HTTP (\d{3})$/u.exec(message)
+  return http === null ? message : fill(t('balanceHttp'), { status: http[1] })
+}
+
 /** The same quota presentation for conversation and image credential records. */
 export function KeyBalance({ row, t }) {
   const usage = row?.usage
@@ -41,11 +54,11 @@ export function KeyBalance({ row, t }) {
     <span className="apc-meta">{meta}</span>
     {figures.length > 0 ? <div className="apc-figures">
       {figures.map(([label, value]) => <span key={label}>{label}<b>{value}</b></span>)}
-    </div> : <span className="apc-meta">{row?.error === undefined ? t('keyNoBalance') : `${t('loadFailed')}: ${row.error}`}</span>}
+    </div> : <span className="apc-meta">{row?.error === undefined ? t('keyNoBalance') : `${t('balanceUnavailable')}：${balanceFailureCopy(row.error, t)}`}</span>}
     {share !== undefined && <div className="apc-bar" data-level={share < 0.1 ? 'low' : share < 0.3 ? 'warn' : 'ok'} role="presentation">
       <span style={{ width: `${Math.round(share * 100)}%` }} />
     </div>}
-    {row?.stale !== undefined && <span className="apc-warn">{fill(t('staleNote'), { time: readTime(row.stale.fetchedAt), error: row.stale.error ?? '' })}</span>}
+    {row?.stale !== undefined && <span className="apc-warn">{`${fill(t('balanceStale'), { time: readTime(row.stale.fetchedAt) })} ${balanceFailureCopy(row.stale.error ?? '', t)}`}</span>}
   </>
 }
 

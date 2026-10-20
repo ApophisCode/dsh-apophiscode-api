@@ -5,8 +5,7 @@ import { ApophisCodeKeyRing } from '../src/key-ring.js'
 import {
   buildSearchRequest,
   createApophisCodeAutoSearchProvider,
-  createApophisCodeSearchProvider,
-  DEFAULT_SEARCH_BACKEND,
+  createApophisCodeSearchProvider as dynamicSearchProvider,
   APOPHISCODE_AUTO_SEARCH_PROVIDER_ID,
   APOPHISCODE_SEARCH_PROVIDER_ID,
   parseMessagesSearchResponse,
@@ -14,6 +13,12 @@ import {
   WebError,
 } from '../src/search.js'
 import { fakeCredentials } from './helpers.mjs'
+
+const SEARCH_ROWS = [{ id: 'search-alpha', api: 'anthropic-messages' }, { id: 'search-beta', api: 'openai-responses' }]
+// Explicit server declarations supplied by this offline gateway fixture.
+const createApophisCodeSearchProvider = options => dynamicSearchProvider({
+  availableModels: async () => SEARCH_ROWS, selectedModel: () => SEARCH_ROWS[0].id, ...options,
+})
 
 async function ringWith(...keys) {
   const ring = new ApophisCodeKeyRing(fakeCredentials())
@@ -109,17 +114,17 @@ test('a Responses answer lists cited sources first, then the URLs its search act
 })
 
 test('each backend builds its own protocol request against the configured host', () => {
-  const deepseek = buildSearchRequest('deepseek', { apiHost: 'https://gw.example', query: 'q', sessionId: 's1' })
+  const deepseek = buildSearchRequest('anthropic-messages', { model: 'search-alpha', apiHost: 'https://gw.example', query: 'q', sessionId: 's1' })
   assert.equal(deepseek.url, 'https://gw.example/v1/messages')
-  assert.deepEqual(deepseek.headers('sk-1'), { 'x-api-key': 'sk-1', 'anthropic-version': '2023-06-01' })
-  assert.equal(deepseek.body.model, 'deepseek-flash')
+  assert.deepEqual(deepseek.headers('sk-1'), { authorization: 'Bearer sk-1', 'anthropic-version': '2023-06-01' })
+  assert.equal(deepseek.body.model, 'search-alpha')
   assert.deepEqual(deepseek.body.tools, [{ type: 'web_search_20250305', name: 'web_search', max_uses: 3 }])
   assert.match(deepseek.body.messages[0].content, /^Perform a web search for the query: q/u)
 
-  const gpt = buildSearchRequest('gpt', { apiHost: 'https://gw.example', query: 'q', sessionId: 's1' })
+  const gpt = buildSearchRequest('openai-responses', { model: 'search-beta', apiHost: 'https://gw.example', query: 'q', sessionId: 's1' })
   assert.equal(gpt.url, 'https://gw.example/v1/responses')
   assert.deepEqual(gpt.headers('sk-1'), { authorization: 'Bearer sk-1' })
-  assert.equal(gpt.body.model, 'gpt-6.1-sol')
+  assert.equal(gpt.body.model, 'search-beta')
   assert.deepEqual(gpt.body.tools, [{ type: 'web_search' }])
   assert.equal(gpt.body.tool_choice, 'required')
   assert.equal(gpt.body.store, false)
@@ -127,8 +132,7 @@ test('each backend builds its own protocol request against the configured host',
   // The Codex group refuses a bare string input on some channels.
   assert.ok(Array.isArray(gpt.body.input))
 
-  assert.equal(DEFAULT_SEARCH_BACKEND, 'deepseek')
-  assert.throws(() => buildSearchRequest('bing', { apiHost: 'https://gw.example', query: 'q' }), /not supported/u)
+  assert.throws(() => buildSearchRequest('bing', { model: 'search-alpha', apiHost: 'https://gw.example', query: 'q' }), /not supported/u)
 })
 
 test('a search authenticates with the active ring key only and refuses redirects', async () => {
@@ -149,20 +153,20 @@ test('a search authenticates with the active ring key only and refuses redirects
   assert.equal(calls.length, 1)
   assert.equal(calls[0].url, 'https://gw.example/v1/messages')
   assert.equal(calls[0].init.redirect, 'error')
-  assert.equal(calls[0].init.headers['x-api-key'], 'sk-first-key-0001')
+  assert.equal(calls[0].init.headers.authorization, 'Bearer sk-first-key-0001')
   assert.ok(calls[0].init.signal instanceof AbortSignal)
 })
 
 test('a configured gateway prefix and API suffix reach the final search URL exactly once', async () => {
   const ring = await ringWith('sk-fixture-search-root-key')
-  for (const [backend, endpoint] of [['deepseek', 'messages'], ['gpt', 'responses']]) {
+  for (const [backend, endpoint] of [['search-alpha', 'messages'], ['search-beta', 'responses']]) {
     for (const suffix of ['', '/v1', '/v1beta/']) {
-      const provider = createApophisCodeSearchProvider({ ring, backend: () => backend,
+      const provider = createApophisCodeSearchProvider({ ring, selectedModel: () => backend,
         hosts: () => ({ apiHost: `https://gateway.example/tenant${suffix}` }),
         fetchImpl: async (url, init) => {
           assert.equal(url, `https://gateway.example/tenant/v1/${endpoint}`)
           assert.equal(init.redirect, 'error')
-          return json(200, backend === 'gpt' ? RESPONSES_ANSWER : MESSAGES_ANSWER)
+          return json(200, backend === 'search-beta' ? RESPONSES_ANSWER : MESSAGES_ANSWER)
         },
       })
       assert.ok((await provider.search({ query: 'q' })).sources.length > 0)
@@ -172,23 +176,23 @@ test('a configured gateway prefix and API suffix reach the final search URL exac
 
 test('the backend preference is read per search', async () => {
   const ring = await ringWith('sk-first-key-0001')
-  let backend = 'deepseek'
+  let backend = 'search-alpha'
   const urls = []
   const provider = createApophisCodeSearchProvider({
     ring,
     hosts: () => ({ apiHost: 'https://gw.example' }),
-    backend: () => backend,
+    selectedModel: () => backend,
     fetchImpl: async url => {
       urls.push(url)
       return json(200, url.endsWith('/responses') ? RESPONSES_ANSWER : MESSAGES_ANSWER)
     },
   })
   await provider.search({ query: 'a' })
-  backend = 'gpt'
+  backend = 'search-beta'
   await provider.search({ query: 'b' })
   backend = 'unknown'
-  await provider.search({ query: 'c' })
-  assert.deepEqual(urls, ['https://gw.example/v1/messages', 'https://gw.example/v1/responses', 'https://gw.example/v1/messages'])
+  await assert.rejects(provider.search({ query: 'c' }), error => error.code === 'WEB_PROVIDER_UNAVAILABLE')
+  assert.deepEqual(urls, ['https://gw.example/v1/messages', 'https://gw.example/v1/responses'])
 })
 
 test('an exhausted key moves aside through the shared sink and the next key answers', async () => {
@@ -203,15 +207,18 @@ test('an exhausted key moves aside through the shared sink and the next key answ
       void ring.disable(id, kind)
     },
     fetchImpl: async (_url, init) => {
-      used.push(init.headers['x-api-key'])
-      return init.headers['x-api-key'] === 'sk-first-key-0001'
+      used.push(init.headers.authorization)
+      return init.headers.authorization === 'Bearer sk-first-key-0001'
         ? json(403, { error: { message: '该令牌额度已用尽', type: 'gateway_api_error' } })
         : json(200, MESSAGES_ANSWER)
     },
   })
+  await assert.rejects(provider.search({ query: 'q' }), /HTTP 403/u)
+  assert.deepEqual(used, ['Bearer sk-first-key-0001'])
+  await ring.activeKey()
   const result = await provider.search({ query: 'q' })
   assert.equal(result.sources.length, 2)
-  assert.deepEqual(used, ['sk-first-key-0001', 'sk-second-key-0002'])
+  assert.deepEqual(used, ['Bearer sk-first-key-0001', 'Bearer sk-second-key-0002'])
   assert.equal(failures.length, 1)
   assert.equal(failures[0].kind, 'quota')
   assert.equal(failures[0].key, 'sk-first-key-0001')
@@ -225,7 +232,7 @@ test('a key whose group does not cover the search model is skipped but never dis
   const provider = createApophisCodeSearchProvider({
     ring,
     hosts: () => ({ apiHost: 'https://gw.example' }),
-    backend: () => 'gpt',
+    selectedModel: () => 'search-beta',
     onKeyFailure: kind => failures.push(kind),
     fetchImpl: async () => {
       calls += 1
@@ -234,11 +241,10 @@ test('a key whose group does not cover the search model is skipped but never dis
   })
   await assert.rejects(provider.search({ query: 'q' }), error => {
     assert.equal(error.code, 'WEB_PROVIDER_ERROR')
-    assert.match(error.message, /no stored API key's group covers gpt-6\.1-sol/u)
-    assert.match(error.message, /Switch the search backend to "deepseek"/u)
+    assert.match(error.message, /model_not_found/u)
     return true
   })
-  assert.equal(calls, 2)
+  assert.equal(calls, 1)
   assert.deepEqual(failures, [])
   assert.equal((await ring.list()).keys.every(key => !key.disabled), true)
 })

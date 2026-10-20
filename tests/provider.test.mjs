@@ -3,9 +3,9 @@ import test from 'node:test'
 
 import { isQuotaExceededError } from '@deepseek-ai/dsh-llm'
 
-import { createApophisCodeCatalog } from '../src/catalog.js'
+import { createApophisCodeCatalog } from './fixtures/declared-gateway.mjs'
 import { DISPLAY_NAME, PROVIDER } from '../src/constants.js'
-import { createApophisCodeProvider, guardKeyRotation } from '../src/provider.js'
+import { createApophisCodeProvider, guardKeyRotation } from './fixtures/declared-gateway.mjs'
 
 /** A pi-ai shaped stream: an async iterable plus `.result()`. */
 function fakeStream(items, { throwAt } = {}) {

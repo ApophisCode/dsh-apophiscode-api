@@ -5,16 +5,17 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
 
-import { IMAGE_MODELS, validateImageOptions } from '../src/image-models.js'
+import { validateImageOptions } from '../src/image-models.js'
 import { createApophisCodeImageClient, createApophisCodeImageTool, decodeImagePng, IMAGE_TOOL_NAME } from '../src/images.js'
 import { JPEG, WEBP } from './fixtures/images.mjs'
 
+const IMAGE_MODELS = { 'gpt-image-2': ['auto', 'high'], 'gpt-image-2.5-sunburst': ['auto', 'max'], 'arbitrary-image-id': ['custom-quality'] }
 const KEY = 'sk-fixture-image-only-key'
 const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jpj8AAAAASUVORK5CYII=', 'base64')
 const REF = { attachmentId: `sha256:${'a'.repeat(64)}`, mediaType: 'image/png', bytes: PNG.length, width: 1, height: 1, name: 'reference.png' }
 const imageResponse = (extra = {}) => new Response(JSON.stringify({ data: [{ b64_json: PNG.toString('base64') }], ...extra }), { headers: { 'content-type': 'application/json' } })
 const args = { prompt: 'A blue teapot', model: 'gpt-image-2.5-sunburst', quality: 'max' }
-const client = (options = {}) => createApophisCodeImageClient({ resolveKey: async () => ({ key: KEY }), getHost: () => 'https://gateway.invalid', ...options })
+const client = (options = {}) => createApophisCodeImageClient({ resolveKey: async () => ({ key: KEY }), availableModels: async () => Object.keys(IMAGE_MODELS).map(id => ({ id })), getHost: () => 'https://gateway.invalid', ...options })
 
 test('generation sends the exact model-specific quality and no legacy or reasoning fields', async () => {
   for (const [model, qualities] of Object.entries(IMAGE_MODELS)) {
@@ -24,7 +25,7 @@ test('generation sends the exact model-specific quality and no legacy or reasoni
       assert.equal(request.url, 'https://gateway.invalid/v1/images/generations')
       assert.equal(request.redirect, 'error')
       assert.equal(request.headers.authorization, `Bearer ${KEY}`)
-      assert.deepEqual(JSON.parse(request.body), { model, quality, size: 'auto', background: 'auto', prompt: args.prompt, n: 1, output_format: 'png' })
+      assert.deepEqual(JSON.parse(request.body), { model, ...(quality === 'auto' ? {} : { quality }), prompt: args.prompt, n: 1, output_format: 'png' })
       assert.equal(value.requestedModel, model)
       assert.equal(value.quality, quality)
       assert.equal(JSON.stringify(value).includes(KEY), false)
@@ -36,14 +37,14 @@ test('invalid model, quality, size, prompt and mask are rejected before any netw
   let calls = 0
   const api = client({ fetchImpl: async () => { calls += 1; return imageResponse() } })
   for (const change of [
-    { model: 'other-provider' }, { model: 'gpt-image-2', quality: 'max' }, { quality: 'ultra' },
-    { size: '1025x1024' }, { size: '3840x3840' }, { size: '4096x1024' }, { size: '256x1024' },
+    { model: 'other-provider' }, { model: '   ' }, { quality: '' },
+    { size: '0x1024' }, { size: '1024' }, { size: '1024X1024' }, { size: '-1x1024' },
     { prompt: '' }, { prompt: 'x'.repeat(32_001) }, { background: 'clear' },
   ]) await assert.rejects(() => api.request({ ...args, ...change }))
   await assert.rejects(() => api.request(args, { mask: {} }), /requires a reference/u)
   await assert.rejects(() => api.request(args, { images: [] }), /1-16/u)
   assert.equal(calls, 0)
-  for (const size of ['auto', '1024x1024', '1536x1024', '3840x2160', '2160x3840']) assert.equal(validateImageOptions({ size }).size, size)
+  for (const size of ['auto', '1024x1024', '1536x1024', '3840x2160', '2160x3840']) assert.equal(validateImageOptions({ model: args.model, size }).size, size)
 })
 
 test('image requests preserve gateway prefixes and normalize either API suffix once', async () => {

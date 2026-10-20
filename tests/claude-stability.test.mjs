@@ -11,7 +11,7 @@ async function fixture(t) {
   let time = Date.parse('2026-10-16T02:30:00Z'), closed = 0
   const calls = []
   const key = 'sk-only-stored-stability-fixture-0001'
-  const options = { statePath: join(directory, 'state.json'), start: true, keyLabel: 'stored fixture', now: () => time, buildHash: async () => 'build-1',
+  const options = { statePath: join(directory, 'state.json'), start: true, models: ['claude-opus-5-5', 'claude-sonnet-5-5', 'claude-haiku-5-5'], keyLabel: 'stored fixture', now: () => time, buildHash: async () => 'build-1',
     loadKey: async ({ label }) => { assert.equal(label, 'stored fixture'); return key },
     makeCheck: async ({ key: supplied }) => { assert.equal(supplied, key); return {
       run: async ({ model, kind }) => { calls.push({ model, kind }); return { model, kind, ok: true, durationMs: 10, requests: [{ status: 200 }] } },
@@ -139,11 +139,11 @@ test('a pinned artifact keeps sampling while another build changes, with per-bui
   assert.equal(summary.builds['build-1'].passed, 8)
 })
 
-for (const [model, slot] of [['Haiku', 6], ['Sonnet', 3]]) test(`${model} tool sampling reserves its bounded replays before spending the remaining budget`, async t => {
+for (const [model, slot] of [['Haiku', 6], ['Sonnet', 3]]) test(`${model} tool sampling reserves the full round before spending the remaining budget`, async t => {
   const f = await fixture(t)
   await sampleStability(f.options)
   const state = await f.state()
-  state.maxRequests = 10 // Four spent; six remain, less than this round's seven.
+  state.maxRequests = 8 // Four spent; four remain, less than this round's five.
   await writeFile(f.options.statePath, JSON.stringify(state))
   f.advance(slot * 15 * 60_000)
   const result = await sampleStability(f.options)

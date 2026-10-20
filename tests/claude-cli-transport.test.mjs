@@ -11,7 +11,7 @@ import { BlockAssembler, createToolResultMessage, createUserMessage } from '@dee
 import { createClaudeCliTransport, CLI_TOOL_NOTE } from '../src/claude-cli-transport.js'
 import { explainCliClientPolicyFailure, explainCliOutdated, explainCliUnavailable } from '../src/failures.js'
 import { ApophisCodeKeyRing } from '../src/key-ring.js'
-import { createRouteAdapter } from '../src/route.js'
+import { createRouteAdapter } from './fixtures/declared-gateway.mjs'
 import { fakeCredentials } from './helpers.mjs'
 
 const FAKE_CLI = fileURLToPath(new URL('./fixtures/fake-claude-cli.mjs', import.meta.url))
@@ -53,7 +53,7 @@ async function harness(t, script, { env = {}, binary } = {}) {
   let requestKey
   const adapter = createRouteAdapter({
     ring, fallbackSessionId: 'cli-fixture',
-    keys: { active: () => ring.activeKey(), forRequest: (_model, key) => requestKey ?? key, onKeyFailure: (kind, _message, key) => failures.push({ kind, key }), awaitGroups: async () => {} },
+    keys: { active: async () => { const active = await ring.activeKey(); return requestKey ? { ...active, key: requestKey } : active }, forRequest: (_model, key) => requestKey ?? key, onKeyFailure: (kind, _message, key) => failures.push({ kind, key }), awaitGroups: async () => {} },
     resolveWorkingDirectory: () => workspace,
     claudeCli: { followsGroups: () => false, choose: () => true, fetch: (input, init, meta) => transport.fetch(input, init, meta) },
   })

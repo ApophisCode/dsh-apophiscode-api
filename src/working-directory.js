@@ -6,7 +6,7 @@ import { posix, win32 } from 'node:path'
  * arguments or history, and never use this process's working directory.
  */
 export function clarifyWorkingDirectory(options, resolveWorkingDirectory) {
-  if (!options.model?.startsWith('claude-') || options.purpose === 'session-title'
+  if (options.purpose === 'session-title'
     || typeof options.system !== 'string' || !options.system.includes('Your working directory is ')
     || typeof resolveWorkingDirectory !== 'function') return options
 

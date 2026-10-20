@@ -69,7 +69,6 @@ export const STYLE = `
 .apc-chip[data-tone=danger]{background:var(--dsw-alias-interactive-bg-hover-danger);color:var(--dsw-alias-state-error-primary)}
 .apc-chip[data-tone=info]{background:var(--dsw-alias-state-business-tertiary);color:var(--dsw-alias-state-business-primary)}
 .apc-chip[data-tone=neutral]{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-secondary)}
-.apc-tag{flex:none;padding:0 6px;border:.5px solid var(--dsw-alias-border-l3);border-radius:var(--dsw-radius-xs,4px);color:var(--dsw-alias-label-secondary);font-family:var(--ds-font-family-code,ui-monospace,SFMono-Regular,Menlo,Consolas,monospace);font-size:11px;line-height:18px;cursor:default}
 .apc-dot{flex:none;width:8px;height:8px;border-radius:50%;background:var(--dsw-alias-state-idle-primary)}
 .apc-dot[data-tone=success]{background:var(--dsw-alias-state-success-primary)}
 .apc-dot[data-tone=warn]{background:var(--dsw-alias-state-warn-primary)}
@@ -90,13 +89,6 @@ export const STYLE = `
 .apc-bar>span{display:block;height:100%;border-radius:inherit;background:var(--dsw-alias-state-success-primary)}
 .apc-bar[data-level=warn]>span{background:var(--dsw-alias-state-warn-primary)}
 .apc-bar[data-level=low]>span{background:var(--dsw-alias-state-error-primary)}
-.apc-groups{display:flex;flex-wrap:wrap;align-items:center;gap:6px 6px}
-.apc-groups>.apc-label{margin-right:2px}
-.apc-reach{display:flex;flex-wrap:wrap;align-items:center;gap:4px 12px;font-size:12px;line-height:18px}
-.apc-reach>span{display:inline-flex;align-items:center;gap:4px;cursor:default}
-.apc-reach>span[data-state=ok]{color:var(--dsw-alias-state-success-primary)}
-.apc-reach>span[data-state=partial]{color:var(--dsw-alias-state-warn-label,#dd8629)}
-.apc-reach>span[data-state=no]{color:var(--dsw-alias-label-caption);text-decoration:line-through}
 .apc-add{display:flex;flex-direction:column;gap:8px;padding-top:14px;border-top:.5px solid var(--dsw-alias-border-l2)}
 
 .apc-models{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin:0;padding:0;min-width:0;border:0}

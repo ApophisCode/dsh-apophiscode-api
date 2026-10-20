@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { BlockAssembler, createUserMessage, createToolResultMessage } from '@deepseek-ai/dsh-llm'
-import { createApophisCodeProvider } from '../src/provider.js'
-import { createRouteAdapter } from '../src/route.js'
+import { createApophisCodeProvider } from './fixtures/declared-gateway.mjs'
+import { createRouteAdapter } from './fixtures/declared-gateway.mjs'
 import { ApophisCodeKeyRing } from '../src/key-ring.js'
 import { createVisionFixture } from '../scripts/vision-fixture.mjs'
 import { fakeCredentials, hostProvider } from './helpers.mjs'
@@ -67,7 +67,7 @@ for (const id of MODELS) {
       assert.equal(request.headers.get('x-custom'), 'kept')
       assert.equal(request.redirect, 'error')
       assert.equal(request.body.output_config.effort, reasoning)
-      assert.equal(request.body.thinking.type, 'adaptive')
+      assert.equal(request.body.thinking, undefined)
       assert.equal(request.body.max_tokens, 2048)
       assert.deepEqual(request.body.tool_choice, { type: 'none' })
       assert.deepEqual(request.body.system.map(block => block.text), ['Original DSH system.'])
@@ -179,7 +179,7 @@ test('direct and prepared Claude titles keep the selected exact model and disabl
     assert.equal(requests.at(-1).body.model, model)
     assert.deepEqual(requests.at(-1).body.tool_choice, { type: 'none' })
     assert.equal(requests.at(-1).body.tools?.length ?? 0, 0)
-    assert.match(requests.at(-1).body.messages.at(-1).content.at(-1).text, /conversation content to name/u)
+    assert.match(requests.at(-1).body.messages.at(-1).content.at(-1).text, /Name the preceding conversation/u)
     assert.ok(requests.at(-1).body.system.some(block => block.text === 'Only a title.'))
     await turn([createUserMessage({ content: [{ type: 'text', text: 'Continue.' }], source: { kind: 'user' } })], { model }, prepared)
     assert.equal(requests.at(-1).body.model, model)

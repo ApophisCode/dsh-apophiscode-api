@@ -6,7 +6,7 @@ import { join } from 'node:path'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 
-import { IMAGE_MODEL_IDS, IMAGE_QUALITIES, validateImageOptions } from './image-models.js'
+import { validateImageOptions } from './image-models.js'
 import { apiRootHost } from './hosts.js'
 import { ambientFetch, waitForSharedRequest } from './request.js'
 
@@ -107,10 +107,9 @@ function imageFailure(status, value) {
 }
 
 /** One paid attempt only. Invalid references never turn an edit into a generation. */
-export function createApophisCodeImageClient({ resolveKey, getHost, fetchImpl = ambientFetch, timeoutMs = IMAGE_TIMEOUT_MS }) {
+export function createApophisCodeImageClient({ resolveKey, getHost, fetchImpl = ambientFetch, timeoutMs = IMAGE_TIMEOUT_MS, availableModels }) {
   return {
     async request(args, { signal, images, mask } = {}) {
-      const options = validateImageOptions(args)
       const prompt = nonempty(args?.prompt)
       if (prompt === undefined || prompt.length > 32_000) throw new ImageRequestError('ApophisCode image prompt must contain 1-32000 characters')
       if (images !== undefined && (!Array.isArray(images) || images.length === 0 || images.length > MAX_REFERENCE_IMAGES)) {
@@ -129,7 +128,17 @@ export function createApophisCodeImageClient({ resolveKey, getHost, fetchImpl = 
       if (typeof selected?.key !== 'string' || selected.key === '') {
         throw new ImageRequestError('ApophisCode images need a separate image key; add one under Settings → ApophisCode → Images')
       }
-      const fields = { ...options, prompt, n: 1, output_format: 'png' }
+      const host = apiRootHost(getHost())
+      if (typeof availableModels !== 'function') throw new ImageRequestError('ApophisCode image model list is unavailable')
+      const models = await availableModels({ entry: selected, apiHost: host, signal: requestSignal })
+      const model = args?.model || models?.[0]?.id
+      if (!models.some(row => row.id === model)) throw new ImageRequestError('ApophisCode image model is absent from the active image key model list')
+      const options = validateImageOptions({ ...args, model })
+      const fields = { model, prompt, n: 1, output_format: 'png',
+        ...(options.quality === 'auto' ? {} : { quality: options.quality }),
+        ...(options.size === 'auto' ? {} : { size: options.size }),
+        ...(options.background === 'auto' ? {} : { background: options.background }) }
+
       let body
       const headers = { authorization: `Bearer ${selected.key}`, accept: 'application/json' }
       if (images === undefined) {
@@ -162,7 +171,6 @@ export function createApophisCodeImageClient({ resolveKey, getHost, fetchImpl = 
       }
       try {
         requestSignal.throwIfAborted()
-        const host = apiRootHost(getHost())
         const response = await fetchImpl(`${host}/v1/images/${images === undefined ? 'generations' : 'edits'}`, {
           method: 'POST', redirect: 'error', headers, body, signal: requestSignal,
         })
@@ -176,8 +184,8 @@ export function createApophisCodeImageClient({ resolveKey, getHost, fetchImpl = 
         const dimensions = pngDimensions(data)
         return {
           data, ...dimensions, requestedModel: options.model, requestedQuality: options.quality, requestedSize: options.size,
-          ...(IMAGE_MODEL_IDS.includes(value?.model) ? { reportedModel: value.model } : {}),
-          ...(IMAGE_QUALITIES.includes(value?.quality) ? { quality: value.quality } : {}),
+          ...(typeof value?.model === 'string' && !value.model.includes(selected.key) ? { reportedModel: value.model } : {}),
+          ...(typeof value?.quality === 'string' && !value.quality.includes(selected.key) ? { quality: value.quality } : {}),
         }
       } catch (error) {
         if (signal?.aborted) throw new ImageRequestError('ApophisCode image request was cancelled')
@@ -258,9 +266,9 @@ export function createApophisCodeImageTool({ client, attachments, getPreference,
     parameters: {
       prompt: { type: 'string', required: true, description: 'Complete image description or precise editing instructions.' },
       operation: { type: 'string', enum: ['generate', 'edit'], description: 'Use generate for a new image; edit requires 1-16 real referenceImages. If omitted, nonempty references select editing, while an omitted or empty array selects generation.' },
-      model: { type: 'string', enum: ['settings', ...IMAGE_MODEL_IDS], description: 'Use settings (or omit) to follow the ApophisCode image setting. Choose an explicit engine only when the user requests one.' },
-      quality: { type: 'string', enum: ['settings', ...IMAGE_QUALITIES], description: 'Use settings (or omit) to follow the user image setting. auto is an explicit API quality, not a request to follow settings. xhigh and max require a 2.5 model; never downgrade automatically.' },
-      size: { type: 'string', description: 'auto or widthxheight, e.g. 1024x1024; both edges multiples of 16, each <=3840, ratio <=3:1, pixels 655360..8294400.' },
+      model: { type: 'string', description: 'Use settings (or omit) to follow the ApophisCode image setting. Choose an explicit engine only when the user requests one.' },
+      quality: { type: 'string', description: 'Use settings (or omit) to follow the user image setting. auto is an explicit API quality, not a request to follow settings. Explicit quality support is decided by the gateway; never downgrade automatically.' },
+      size: { type: 'string', description: 'auto or widthxheight, e.g. 1024x1024. Supported dimensions are determined by the gateway.' },
       background: { type: 'string', enum: ['auto', 'opaque', 'transparent'] },
       referenceImages: { type: 'array', items: referenceSchema, description: '1-16 complete attachment references for editing. Omit or use [] for a new image. Paths and unrelated images are not accepted; never drop real references after an edit fails.' },
       maskImage: { oneOf: [{ type: 'null' }, referenceSchema], description: 'Omit or use null for new images and ordinary reference-image edits, including refining a sketch. Only supply an actual PNG mask provided for masking, matching the first reference and under 4 MB; alpha=0 marks the area to edit. Do not copy an ordinary reference into this field or invent a mask.' },

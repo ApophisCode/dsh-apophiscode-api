@@ -40,7 +40,7 @@ test('public group identity preserves numeric IDs and Unicode names without memb
   assert.deepEqual(directory.modelGroups['claude-opus-5-5'], ['2', '3'])
   assert.equal(directory.descriptions['1'], 'codex - 福利分组: 中文公开说明')
   assert.deepEqual(directory.groups.map(group => group.name), ['codex - 福利分组', 'claude - 满血Max', 'claude - 满血Max'])
-  assert.equal(directory.modelGroups['outside-catalog'], undefined)
+  assert.deepEqual(directory.modelGroups['outside-catalog'], ['3'])
   assert.equal(parseModelPlaza({ data: [] }), undefined)
   assert.equal(parseModelPlaza({ code: 1, data: { groups: [] } }), undefined)
   assert.equal(parseModelPlaza({ code: 0, data: { groups: [{ id: '中文名', name: 'bad', models: [] }] } }), undefined)
@@ -107,7 +107,7 @@ test('unrecognized model lists stay unknown; rejections and stale key results st
   const reader = createGroupReader({ listKeys: async () => KEYS, getHosts: () => HOSTS, fetchImpl: net.fetchImpl })
   const first = await reader.read()
   assert.equal(first.keys[1].rejected, true)
-  assert.equal(reader.covers('b', 'deepseek-v4.1-flash'), false)
+  assert.equal(reader.covers('b', 'deepseek-v4.1-flash'), undefined)
   failed[KEYS[0].key] = `fetch failed with ${KEYS[0].key}`
   const second = await reader.read({ force: true })
   assert.equal(second.keys[0].coverage['gpt-6.1-sol'], true)
@@ -192,4 +192,11 @@ test('a key is passed over only on evidence, and the active pointer is never mov
   evidence['c:claude'] = true
   assert.equal(pickKeyForModel('claude', usable[1], usable, covers).id, 'c')
   assert.equal(pickKeyForModel('claude', undefined, usable, covers), undefined)
+})
+
+
+test('arbitrary public model IDs cannot collide with Object prototype names', () => {
+  const value = parseModelPlaza({ code: 0, data: { groups: [{ id: 1, name: 'opaque', models: ['__proto__', 'toString'].map(name => ({ name })) }] } })
+  assert.deepEqual(value.modelGroups.__proto__, ['1'])
+  assert.deepEqual(value.modelGroups.toString, ['1'])
 })

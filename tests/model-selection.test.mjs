@@ -1,14 +1,15 @@
+import { modelRow } from './fixtures/declared-gateway.mjs'
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { Context } from '@deepseek-ai/cordis'
 import { LlmRuntime } from '@deepseek-ai/dsh-llm'
 
-import { APOPHISCODE_MODEL_IDS } from '../src/catalog.js'
+import { APOPHISCODE_MODEL_IDS } from './fixtures/declared-gateway.mjs'
 import { apply, Config } from '../src/index.js'
 import { createModelSelectionController, readHiddenModels } from '../src/model-selection.js'
 import { fieldValue } from '../src/preferences.js'
 import { ApophisCodeKeyRing } from '../src/key-ring.js'
-import { createRouteAdapter } from '../src/route.js'
+import { createRouteAdapter } from './fixtures/declared-gateway.mjs'
 import { fakeCredentials, singleKeyRecord } from './helpers.mjs'
 
 /** DSH 0.2.1 lists a route's models only once its key resolves. */
@@ -16,7 +17,7 @@ const KEY = 'sk-model-selection-fixture-not-a-real-key'
 
 test.beforeEach(t => {
   t.mock.method(globalThis, 'fetch', async input => new URL(typeof input === 'string' ? input : input.url).pathname.endsWith('/v1/models')
-    ? Response.json({ data: APOPHISCODE_MODEL_IDS.map(id => ({ id })) })
+    ? Response.json({ data: APOPHISCODE_MODEL_IDS.map(modelRow) })
     : Response.json({ code: 0, data: { groups: [] } }))
 })
 
@@ -126,6 +127,7 @@ for (const generation of ['0.1', '0.2']) {
 
 test('a volatile edit elsewhere refreshes only once, without changing other settings', async () => {
   const { seen, changeHidden } = host()
+  await seen.handler('models/status')
   changeHidden(['gpt-6-astra', 'deepseek-v4.1-flash'])
   assert.equal(seen.notifications, 1)
   changeHidden(['deepseek-v4.1-flash', 'gpt-6-astra', 'deepseek-v4.1-flash', 'future-model'])
@@ -191,7 +193,7 @@ test('raw dated IDs and unknown metadata can be selected, and exclusions survive
   ids = new Set([alias, unknown])
   const restored = await selection.status()
   assert.equal(restored.models.find(model => model.id === alias).selected, false)
-  assert.match(restored.models.find(model => model.id === unknown).unavailableReason, /metadata/u)
+  assert.equal(restored.models.find(model => model.id === unknown).unavailableReason, undefined)
 })
 
 test('the actual DSH LLM registry refreshes discovery atomically and keeps a prepared call usable', async () => {
@@ -202,6 +204,7 @@ test('the actual DSH LLM registry refreshes discovery atomically and keeps a pre
   let notifications = 0
   ctx.on('llm/adapters-updated', () => { notifications += 1 })
   const selection = createModelSelectionController({
+    availableModelIds: async () => new Set(APOPHISCODE_MODEL_IDS),
     readPreference: () => preferences,
     writePreference: async patch => { preferences = { ...preferences, ...patch } },
     isWritable: () => true,
@@ -209,7 +212,7 @@ test('the actual DSH LLM registry refreshes discovery atomically and keeps a pre
   })
   const ring = new ApophisCodeKeyRing(fakeCredentials({ record: singleKeyRecord(KEY) }))
   const keys = { active: () => ring.activeKey(), forRequest: (_model, key) => key, onKeyFailure() {} }
-  const adapter = createRouteAdapter({ ring, keys, isModelVisible: selection.isVisible })
+  const adapter = createRouteAdapter({ ring, keys, isModelVisible: selection.isVisible, availableModelIds: async () => new Set(APOPHISCODE_MODEL_IDS) })
   registration = llm.registerAdapter(['apophiscode'], adapter)
   const prepared = await adapter.prepareCall('apophiscode', 'deepseek-v4.1-flash')
   const before = notifications

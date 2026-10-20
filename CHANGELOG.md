@@ -1,5 +1,52 @@
 # Changelog
 
+## 0.1.7 — 2026-10-20
+
+- Route DeepSeek-family conversations through Responses under the explicitly
+  requested Apophis transport policy, ahead of protocol references. Keep raw
+  active-key model IDs and distinct effort metadata; send one business request
+  without a protocol probe or alternate-endpoint replay. Other families retain
+  their existing protocol resolution. Record policy evidence separately from
+  SDK metadata and gateway capability declarations.
+- Include exact-ID capability agreements from the SDK's remaining catalogs
+  when a native supplier has no entry. Resolve protocol and effort conflicts
+  independently, retain native and gateway precedence, and never copy another
+  supplier's endpoint, credentials or compatibility settings. This restores
+  supplementary SDK models without an unrelated Responses verification gate.
+- Fix stale model cards after key switches by giving model and search cards
+  distinct React identities. Keep credential status independent of balance
+  failures or pending reads, allow key actions while balances load, and localize
+  balance errors with explicit last-success timestamps.
+- Restore model-specific reasoning choices from exact installed-SDK metadata
+  when the gateway omits them. Gateway declarations take priority; unknown IDs
+  stay visible without guessed efforts. Use the exact SDK protocol directly
+  and use its explicit effort encoding without forcing defaults or raising a
+  caller's output cap. Reserve probes for unknown protocols, so known models
+  cannot be blocked by a separate verification request. Keep gateway acceptance
+  separate from SDK reference data.
+- Distinguish protocol verification connection failures, deadline expiry,
+  response-body limits, invalid responses and gateway HTTP rejection. Include
+  the failing endpoint and safe transport code; redact reflected credentials.
+- Remove duplicate per-key model lists from Accounts and keys. Keep model
+  visibility controls in their dedicated card and simplify the introductory copy.
+  Remove group and Claude transport details from key rows; account refresh
+  reloads the active key's models without requesting group listings.
+- Remove plugin-owned model catalogs, aliases, model-name protocol dispatch,
+  capacity/effort defaults, title substitutes and fixed search/image model choices.
+  Preserve active-key gateway IDs and response order across discovery, settings,
+  preparation, invocation and maintenance scripts.
+- Use structured gateway declarations, or bounded independent text verification
+  for undeclared protocols. Isolate evidence by target/key/exact ID, coalesce
+  concurrent checks and expire evidence after ten minutes. Business payloads
+  never become protocol probes; ambiguous failures never switch protocols.
+- Keep undeclared limits, image input and efforts absent from exact SDK metadata unknown. Use an application
+  request budget where Messages requires one, preserve explicit efforts and
+  keep HTTP as the default without a Claude Code CLI installation dependency.
+- Use dynamic search/image settings through RPC and report directory failures
+  separately from successful credential writes. Preserve explicit image quality
+  on model changes. Tests use explicit offline gateway declarations; live text
+  evidence and remaining DSH acceptance are recorded in docs/validation.md.
+
 ## 0.1.6 — 2026-10-20
 
 - Fix plugin updates on Windows CLI hosts by locating npm/Corepack pnpm
