@@ -34,8 +34,31 @@ pnpm run check
 ```
 
 本节全部使用明确的离线网关响应，不证明用户 GPT Key 的实际权限或真实调用成功。
-0.1.5 正在按手动发行流程准备，公开状态待 npm 与 Release 完整性核对后另行记录。
+0.1.5 已公开，分发状态与产物完整性见下节发布后记录。
 本次没有安装到用户 DSH，没有读取用户 Key、调用真实网关，或操作现有 DSH 生命周期。
+
+## 0.1.5 公开发行验证
+
+- [npm 精确版本](https://www.npmjs.com/package/dsh-apophiscode-api/v/0.1.5)已公开，
+  `latest` 指向 `0.1.5`；[GitHub v0.1.5 Release](https://github.com/ApophisCode/dsh-apophiscode-api/releases/tag/v0.1.5)
+  已作为最新正式发行公开。中英文安装示例已更新，npm 首页 README 与发行提交一致。
+- 固定发行提交为 `1769e289a1f71b811ce7b30294d9498a3597d4b5`。
+  [准备任务](https://github.com/ApophisCode/dsh-apophiscode-api/actions/runs/39355650839)
+  完成 586/586 检查、构建一致性与 preflight；下载审查的全部包内文件与发行提交匹配，
+  `package.json` 仅含 pnpm 打包时正常省略 `packageManager` 的差异。
+- [正式发布任务](https://github.com/ApophisCode/dsh-apophiscode-api/actions/runs/39355799323)
+  通过 GitHub Actions OIDC 上传同一份 tgz。npm 元数据尚未同步时，Release 阶段因精确版本
+  返回 404 而停止。待精确版本、latest 与公开下载包核对通过后，在同一提交执行
+  [release-existing](https://github.com/ApophisCode/dsh-apophiscode-api/actions/runs/39356198069)
+  成功补齐 tag 和 Release，没有重复发布 npm。
+- npm、Release 附件和准备/发布 CI artifact 的 tgz 逐字节一致：**53 个文件、463983 字节**，
+  SHA-256 为 `af683b2b655d587e46b0fb404abc2ab87e5c5d4da3a8bf5cd38a45231c119055`。
+  `SHA256SUMS`、Release 说明和 tag 目标均与固定发行物、发行提交对应。
+- npm 公开 provenance 的包摘要、仓库 ID `1425822020`、workflow
+  `.github/workflows/publish.yml`、main 来源提交和正式发布任务均核对一致。
+
+本节为发布后补录；发行包对应上述固定提交，未重新打包或覆盖已公开版本。
+公开分发验证不作为已在用户 DSH 安装、加载或完成真实 GPT 调用的证据。
 
 ## 0.1.4 发行范围
 
