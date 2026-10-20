@@ -1,6 +1,6 @@
 # ApophisCode 验证记录
 
-日期：2026-10-19。离线 fixture、真实网关调用和运行中 DSH 交互分别记录。
+日期：2026-10-20。离线 fixture、真实网关调用和运行中 DSH 交互分别记录。
 本页描述当前实现的证据与限制；本地开发过程和逐次检查日志保存在忽略目录。
 
 ## 0.1.4 发行范围
@@ -10,8 +10,27 @@
 实现 helper、React 组件和本地宿主测试包均使用 ApophisCode 名称。
 发行包仅包含当前运行文件、安装文档及完整许可，不包含本地参考材料或开发过程归档。
 
-当前正在准备 0.1.4，公开状态以官方 npm 与 GitHub Releases 的实际结果为准。
+0.1.4 已在官方 npm 公开，`latest` 指向 0.1.4；对应 tag 与 GitHub Release 已完成。
 本次没有安装、启动、停止或重启用户现有 DSH，没有读取用户 Key 或发送模型请求。
+
+## 0.1.4 公开发行验证
+
+- [npm 精确版本](https://www.npmjs.com/package/dsh-apophiscode-api/v/0.1.4)与
+  [GitHub v0.1.4 Release](https://github.com/ApophisCode/dsh-apophiscode-api/releases/tag/v0.1.4)
+  均已公开；中英文 README 随包发布，npm 首页 README 与发行源码一致。
+- 发行提交为 `348c8b15be4c7fa7d22ee8ee8e888b06fa1290a0`。
+  正式发布使用 GitHub Actions OIDC，公开 provenance 的仓库 ID、workflow、来源提交和
+  SHA-512 均与当前仓库及发行包对应。
+- npm、Release 附件和 CI artifact 的 tgz 逐字节一致：52 个文件、461699 字节，
+  SHA-256 为 `40470bbfbc5c09ca66338db7df15f722d9b2fca3eae0adde115628ac671f6303`。
+  公开包与发行提交的运行文件和完整许可一致。
+- [发行任务](https://github.com/ApophisCode/dsh-apophiscode-api/actions/runs/39281940335)
+  的第二次执行完成 npm 发布；随后 Release 步骤遇到 npm 元数据暂时 404。
+  在公开包完整性核对通过后，仅用
+  [release-existing](https://github.com/ApophisCode/dsh-apophiscode-api/actions/runs/39352701226)
+  补齐 tag 与 Release，没有重复 npm 发布。
+
+本节记录公开分发验证，不作为当前版本已在用户 DSH 安装、加载或完成真实调用的证据。
 
 ## 模型目录规则与验证口径
 

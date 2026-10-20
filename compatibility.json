@@ -1,6 +1,6 @@
 {
   "latestTested": "0.2.1-rc.2",
-  "latestTestedScope": "Offline host packages and prepared 0.1.4 source/package; development-time real DSH chat for two exact DeepSeek IDs. Real 0.1.4 npm DSH installation and live update remain unverified.",
+  "latestTestedScope": "Offline host packages and published 0.1.4 source/package; development-time real DSH chat for two exact DeepSeek IDs. Real 0.1.4 npm DSH installation and live update remain unverified.",
   "acceptedRuntimeRange": ">=0.1.5-rc.1 <0.3.0-0",
   "supported": [
     "0.2.0-rc.2",
@@ -8,7 +8,7 @@
   ],
   "piAi": "1.1.0",
   "validation": {
-    "date": "2026-10-19",
+    "date": "2026-10-20",
     "project": "dsh-apophiscode-api",
     "targetDsh": "0.2.1-rc.2 (profile web)",
     "offline": "576/576 full check; registered adapter, ToolRuntime, Cordis/HostConnection and client packages for 0.2.0-rc.2/0.2.1-rc.2. Unpacked transport boundaries 6/6; original development regressions 79/79 locally. See docs/validation.md.",
@@ -16,6 +16,6 @@
     "runningDsh": "Development-time local DSH chat and tools verified for deepseek-v4.1-flash/deepseek-v4-pro. No claim that current 0.1.4 is installed or loaded in the user's DSH.",
     "googleTransport": "Locally bundled pi-ai 1.1.0 native Google API and patched @google/genai 2.21.0 reject redirects and preserve framed SSE error status/reasons. Version/hash/patch and bundle checks fail closed. No host SDK patch or global fetch patch is required; both Gemini models have built-adapter local-server regressions and DSH 0.2.0-rc.2 adapter/tool loops.",
     "report": "docs/validation.md",
-    "distribution": "0.1.4 prepared locally; official npm/latest, provenance and matching GitHub tag/Release must be verified after publication. No real npm DSH installation or cross-version update performed."
+    "distribution": "0.1.4 is public on official npm/latest and GitHub v0.1.4 at commit 348c8b15be4c7fa7d22ee8ee8e888b06fa1290a0. Public npm tarball, GitHub asset and CI artifact are byte-identical; SHA256 40470bbfbc5c09ca66338db7df15f722d9b2fca3eae0adde115628ac671f6303. OIDC publisher, provenance source and README verified. No real npm DSH installation or cross-version update performed."
   }
 }

@@ -14,3 +14,6 @@
   entry. Keep local development references and process records out of the package.
 - Preserve credential isolation, transport safeguards and all required licenses.
   Validation and live-service limits are recorded in `docs/validation.md`.
+- Published to npm latest and GitHub v0.1.4 on 2026-10-20. Public tarballs match
+  the reviewed CI artifact; OIDC provenance and installation documentation are
+  verified. Real DSH installation and live updates remain unverified.
