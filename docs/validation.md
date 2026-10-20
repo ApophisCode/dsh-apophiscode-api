@@ -5,8 +5,8 @@
 
 ## 0.1.7 动态模型与思考档位
 
-发行准备状态：源码、版本说明和本地验证已整理；npm、tag 与 GitHub Release 的公开状态
-需在发行后单独核验。本节与下方 0.1.6 及更早版本的证据分开。
+发行状态：0.1.7 已在官方 npm 和 GitHub Release 公开，安装包与固定发行提交的核对结果
+见下方「0.1.7 公开发行验证」。本节与下方 0.1.6 及更早版本的证据分开。
 
 ### 实现范围
 
@@ -63,10 +63,43 @@
 
 ### 证据边界
 
-真实调用来自上述明确构建，最终发行物另行核对；未在用户原会话发送验收消息。
+真实调用来自上述明确构建，最终发行物已按下节核对；未在用户原会话发送验收消息。
 未知档位、上下文或图片能力保持未知；没有宣称目录中所有型号、所有档位或搜索/图片
 均已实测。网络与响应延迟仍可能发生；只收到正文而没有合法终态的尝试不计成功。
 逐次诊断、失败与安装备份仅保留在本地忽略目录，发布不携带凭据或用户会话。
+
+## 0.1.7 公开发行验证
+
+- 2026-10-20T10:18:12Z，[npm 精确版本](https://www.npmjs.com/package/dsh-apophiscode-api/v/0.1.7)、
+  registry 精确版本、`latest` 与默认公开 tarball 均核对为 **0.1.7**。
+  [GitHub v0.1.7 Release](https://github.com/ApophisCode/dsh-apophiscode-api/releases/tag/v0.1.7)
+  为最新正式发行，tag 指向固定源码提交 `1c7f26ac09179891b6e6985da1348f4a28e2dbf4`。
+- [普通 CI](https://github.com/ApophisCode/dsh-apophiscode-api/actions/runs/39405861439)
+  的 Ubuntu 全量检查 **663/663**，Windows、Linux、macOS 更新进程检查各 **11/11**，
+  均通过且 bundle 再生一致。
+  本地完整检查 **663/663**、发行文档与 preflight 检查 **12/12**，实际本地 tarball
+  解包后的 DeepSeek Responses 工具/历史及 Gemini 传输边界检查 **9/9**，全部通过。
+- [正式发布任务](https://github.com/ApophisCode/dsh-apophiscode-api/actions/runs/39405969325)
+  的 prepare/publish 成功，使用 GitHub Actions OIDC 发布 CI 生成的同一 tgz。
+  npm 精确版本元数据暂时 404，Release 核对因此停止；元数据与实际公开下载可读并核对后，
+  保持 main 提交不变，以 [release-existing](https://github.com/ApophisCode/dsh-apophiscode-api/actions/runs/39406670417)
+  成功补齐 tag 与 Release，publish job 正确跳过，没有重复 npm 发布。
+- npm 默认下载包、GitHub 附件及上述两次 CI artifact 的 tgz 逐字节一致：
+  **55 个文件、476244 字节**，SHA-256 为
+  `4b6480fb10e9a7617b785d206ff8d9914f48009005c28b0df2b1e6150c588c2d`。
+  npm SHA-512 integrity 与产物一致；包内文件逐一匹配固定提交的 git blob，
+  仅 `package.json` 有 pnpm 正常省略 `packageManager` 的差异。
+  本地审查包有五个文档使用 CRLF，字节与 CI 公开包不同，不将其当作公开包的哈希。
+- Release 标题、正文和 `SHA256SUMS` 与准备产物一致，npm 首页 README 与公开包一致。
+  npm 公开 publish/provenance statements 的包摘要、仓库 ID `1425822020`、main 来源提交、
+  `.github/workflows/publish.yml` 与正式发布 run 字段均核对一致；此处为字段及摘要核对，
+  未单独进行密码学验签。包内容与凭据形状扫描通过，许可证和第三方 notices 保留。
+
+本节和 compatibility.json 的发行状态为发布后补录，未重新打包或覆盖公开的 0.1.7。
+正式发行物未安装到用户 DSH；本次发布阶段未操作其安装、启停或重启，也未读取用户 Key
+或新增模型调用。原 DSH 仍为上节记录的本地测试包，不能将公开分发核验当作正式包运行证据。
+通过本地文件安装的用户需在宿主「设置 → 插件」显式安装 `dsh-apophiscode-api@0.1.7`
+切换到 npm 来源，并遵守宿主发布冷却期；真实跨版本在线升级仍未现场验收。
 
 ## 0.1.6 修复：点击更新后安装器启动失败
 

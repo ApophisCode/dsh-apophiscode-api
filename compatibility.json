@@ -1,6 +1,6 @@
 {
   "latestTested": "0.2.1-rc.2",
-  "latestTestedScope": "0.1.7 release candidate: 663/663 offline checks with current dynamic model/effort behavior, built and locally exercised in DSH 0.2.1-rc.2/web. Exact active-key IDs, distinct gateway/SDK efforts and explicit DeepSeek Responses policy; other families retain their protocol resolution. Live text and ToolRuntime evidence is scoped to the explicit builds in docs/validation.md. Public npm/tag/Release verification is pending.",
+  "latestTestedScope": "0.1.7 published: 663/663 local Windows and Ubuntu CI offline checks with dynamic model/effort behavior; Windows/Linux/macOS updater process checks each 11/11. Exact active-key IDs, distinct gateway/SDK efforts and explicit DeepSeek Responses policy; other families retain their protocol resolution. Implementation-stage builds were locally exercised in DSH 0.2.1-rc.2/web; live text and ToolRuntime evidence is scoped to the explicit builds in docs/validation.md. Public npm/tag/Release bytes and source commit are verified; the final public package has not been installed in the user's DSH.",
   "acceptedRuntimeRange": ">=0.1.5-rc.1 <0.3.0-0",
   "supported": [
     "0.2.0-rc.2",
@@ -11,14 +11,14 @@
     "date": "2026-10-20",
     "project": "dsh-apophiscode-api",
     "targetDsh": "0.2.1-rc.2 (profile web)",
-    "offline": "0.1.7: Windows local full check 663/663, zero failures or skips, both bundles regenerated and package produced. Registered PiAiAdapter, ToolRuntime, HostConnection and built-client checks remain covered, including DSH 0.2.0-rc.2/0.2.1-rc.2 seams. Historical 0.1.6 Windows/Ubuntu checks were 605/605, with native Windows/Linux/macOS updater checks each 11/11 at commit 2a4aa6cad33ef828cf57f519deb6d7320c8a05ad. Current CI evidence is recorded after push.",
+    "offline": "0.1.7: Windows local full check and Ubuntu CI each 663/663, zero failures or skips; both bundles regenerate identically at commit 1c7f26ac09179891b6e6985da1348f4a28e2dbf4, CI run 39405861439. Windows/Linux/macOS native updater process checks each 11/11. Release documentation/preflight checks 12/12; unpacked local tarball DeepSeek Responses tool/history and Gemini transport boundary checks 9/9. Registered PiAiAdapter, ToolRuntime, HostConnection and built-client checks remain covered, including DSH 0.2.0-rc.2/0.2.1-rc.2 seams.",
     "liveGateway": "Partial: model lists and usage succeeded. Real DSH chat received normal replies from deepseek-v4.1-flash and deepseek-v4-pro; deepseek-v4-flash returned 404/model_not_found, deepseek-v4-flash-0731 retried 503, and deepseek-flash was stopped without a final answer. No claim that every listed model is callable.",
     "runningDsh": "Installed local tarball cbacac1af65a2d117b0aa91e6549b5aab1b14b28c7334154ed29379fd354f6d5 in existing DSH 0.2.1-rc.2/web. Seven bundles match final build; other dependencies, bundle order and profile configuration preserved. Same-version restart PID 33024, no module load failure, install-check findings empty. 2026-10-20T09:14:49.551Z DOM: one model section, test key active, five exact raw IDs in order. No user-session message or model/effort selection change.",
     "googleTransport": "Locally bundled pi-ai 1.1.0 native Google API and patched @google/genai 2.21.0 reject redirects and preserve framed SSE error status/reasons. Version/hash/patch and bundle checks fail closed. No host SDK patch or global fetch patch is required; both Gemini models have built-adapter local-server regressions and DSH 0.2.0-rc.2 adapter/tool loops.",
     "report": "docs/validation.md",
-    "distribution": "0.1.6 is public on official npm/latest and GitHub v0.1.6 at commit 2a4aa6cad33ef828cf57f519deb6d7320c8a05ad. Default public npm tarball, GitHub asset and prepare/publish CI artifacts are byte-identical: 54 files, 469238 bytes, SHA256 d43d1b4aa9c9204be8b48cd9652a80234dd96ba3a7c4302d7360588c4e61d956. OIDC provenance fields, package digest, tag, release notes and npm README verified at 2026-10-20T02:44:18Z. Publish run 39359871725 succeeded in npm; release-existing run 39360181649 completed after transient npm metadata 404. A cached tarball 404 was allowed to expire before declaring the download ready; npm was not republished. No real npm DSH installation or cross-version update performed.",
+    "distribution": "0.1.7 is public on official npm/latest and GitHub v0.1.7 at commit 1c7f26ac09179891b6e6985da1348f4a28e2dbf4. Default public npm tarball, GitHub asset and both CI artifacts are byte-identical: 55 files, 476244 bytes, SHA256 4b6480fb10e9a7617b785d206ff8d9914f48009005c28b0df2b1e6150c588c2d. Package files match committed git blobs, except pnpm's normal packageManager omission. Local reviewed tgz differs only because five documents used CRLF; it is not the public tgz. OIDC statement source fields/digests, tag, release title/body, checksum and npm README verified at 2026-10-20T10:18:12Z; no independent cryptographic signature verification was performed. Publish run 39405969325 succeeded in npm; release-existing run 39406670417 completed after transient npm metadata 404, without republishing npm. This record was added after publication without rebuilding or replacing 0.1.7. No final npm package installation or real DSH cross-version update performed.",
     "dynamicModels": {
-      "state": "release-candidate",
+      "state": "published",
       "offline": "663/663, zero failures or skips; nine added DeepSeek policy regressions covering exact and future raw IDs, family boundaries, explicit policy provenance/precedence, directory protocol conflicts, no preflight POST, no business-502 replay, and real offline ToolRuntime continuation. Earlier supplementary SDK, supplier encodings, effort/default/cap, failure and key-refresh regressions pass.",
       "live": "Final build 9e275f93c5d5538aa4868ee64bbe324cd56c62c9203150cc770d82b097f6a679: 2026-10-20T07:35:29.751Z claude-opus-5-5/XHigh and 2026-10-20T07:37:47.094Z claude-opus-4-7/High each listed under the active key and sent one direct Messages stream, HTTP 200, finish stop, OK; adaptive, selected effort encoded, output cap 512. No CLI installation. Earlier 4-8 Responses evidence is historical.",
       "limits": "No claim for all models, efforts or actual gateway reasoning depth. SDK references do not prove current-key gateway support. Context/image declarations remain unknown when omitted; unmatched or conflicting efforts stay unknown. Intermittent connection and response delays are not declared fixed. No real GPT call with the supplementary-catalog build, nor new image/search live validation. Current DeepSeek tool evidence and historical Claude build evidence remain separate.",
@@ -38,11 +38,22 @@
         "runningDsh": "Installed local tarball cbacac1af65a2d117b0aa91e6549b5aab1b14b28c7334154ed29379fd354f6d5 in existing DSH 0.2.1-rc.2/web. Seven bundles match final build; other dependencies, bundle order and profile configuration preserved. Same-version restart PID 33024, no module load failure, install-check findings empty. 2026-10-20T09:14:49.551Z DOM: one model section, test key active, five exact raw IDs in order. No user-session message or model/effort selection change."
       }
     },
-    "releaseCandidate": {
+    "release": {
       "version": "0.1.7",
-      "state": "prepared-unpublished",
+      "state": "published",
       "report": "docs/validation.md",
-      "offline": "663/663 Windows local",
+      "verifiedAt": "2026-10-20T10:18:12Z",
+      "sourceCommit": "1c7f26ac09179891b6e6985da1348f4a28e2dbf4",
+      "ciRun": 39405861439,
+      "publishRun": 39405969325,
+      "releaseRun": 39406670417,
+      "packageFiles": 55,
+      "tarballBytes": 476244,
+      "tarballSha256": "4b6480fb10e9a7617b785d206ff8d9914f48009005c28b0df2b1e6150c588c2d",
+      "npmIntegrity": "sha512-SF+szi4ZTgwFLeMLpVV1YLwDPkkaxej+r+u0inlP/iibx9eOwEaMoO6cvrCPBKVo5g6cuc9qDuryF1IPrWgZFQ==",
+      "npmUrl": "https://www.npmjs.com/package/dsh-apophiscode-api/v/0.1.7",
+      "githubReleaseUrl": "https://github.com/ApophisCode/dsh-apophiscode-api/releases/tag/v0.1.7",
+      "offline": "663/663 Windows local and Ubuntu CI; native updater Windows/Linux/macOS each 11/11",
       "hostSha256": "69fa87a86ca990d26f9eafc0efb7ab1fac64159281df207a55e55ac99ce2c9a6",
       "clientSha256": "cad03d3293b930527d05ca9e133730dc31346807365e3df608eac0638482f25e"
     }
