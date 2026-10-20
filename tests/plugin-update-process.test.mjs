@@ -29,7 +29,8 @@ async function updateProcess({ launcher = 'path', outcome = 'success', corepack 
     const fs = require('node:fs')
     const path = require('node:path')
     assert.deepEqual(process.argv.slice(2), ['add', '--save-exact', '--registry=https://registry.npmjs.org/', '${PACKAGE_NAME}@0.1.5'])
-    assert.equal(process.cwd(), ${JSON.stringify(profile)})
+    // macOS exposes /var through /private/var; require the same physical profile.
+    assert.equal(fs.realpathSync(process.cwd()), fs.realpathSync(${JSON.stringify(profile)}))
     const outcome = ${JSON.stringify(outcome)}
     if (outcome === 'pending') {
       console.error('ERR_PNPM_NO_MATURE_MATCHING_VERSION offline fixture')
