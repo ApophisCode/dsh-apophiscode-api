@@ -62,7 +62,7 @@ Have a working DSH installation and a conversation API key from [Apophis](https:
 Open **Settings → Plugins → Add Plugin** and enter this in the package name/address field:
 
 ```text
-dsh-apophiscode-api@0.1.4
+dsh-apophiscode-api@0.1.5
 ```
 
 Install it and confirm that **ApophisCode** is enabled. This requests the exact npm version.
@@ -179,7 +179,7 @@ pnpm install --frozen-lockfile
 pnpm run check
 ```
 
-After `check` passes, install `.artifacts/dsh-apophiscode-api-0.1.4.tgz` using the local-file method above.
+After `check` passes, install `.artifacts/dsh-apophiscode-api-0.1.5.tgz` using the local-file method above.
 
 | Command | Purpose |
 | --- | --- |

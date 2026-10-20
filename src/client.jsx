@@ -212,7 +212,7 @@ function RegisterInvite({ t }) {
   )
 }
 
-function AccountsCard({ call, t }) {
+function AccountsCard({ call, t, onModelsChanged }) {
   const [status, setStatus] = react.useState()
   const [balance, setBalance] = react.useState()
   const [groups, setGroups] = react.useState()
@@ -230,7 +230,8 @@ function AccountsCard({ call, t }) {
       .then(setGroups)
       .catch(failure => setGroupsError(clearMessage(failure)))
       .finally(() => setGroupsLoading(false))
-  }, [call])
+      .then(() => { if (force) onModelsChanged() })
+  }, [call, onModelsChanged])
 
   const load = react.useCallback((force = false) => {
     const current = ++generation.current
@@ -266,6 +267,7 @@ function AccountsCard({ call, t }) {
       .then(
         nextStatus => {
           setStatus(nextStatus)
+          if (endpoint !== 'keys/rename') onModelsChanged()
           void readGroups(false)
           return call('balance', { force: true })
             .then(setBalance, failure => setError({ kind: 'read', message: clearMessage(failure) }))
@@ -802,13 +804,15 @@ function VersionCard({ call, t }) {
 
 function ApophisCodeSection({ rpc, t }) {
   const call = useCaller(rpc)
+  const [modelRevision, modelsChanged] = react.useReducer(revision => revision + 1, 0)
   return (
     <div className="apc">
       <p className="apc-intro">{t('intro')}</p>
-      <AccountsCard call={call} t={t} />
+      <AccountsCard call={call} t={t} onModelsChanged={modelsChanged} />
       <ApophisCodeImagesCard call={call} t={t} />
       <ClaudeCliCard call={call} t={t} />
-      <ModelsCard call={call} t={t} />
+      {/* A new directory discards the previous rows, errors and pending replies. */}
+      <ModelsCard key={modelRevision} call={call} t={t} />
       <SearchCard call={call} t={t} />
       <VersionCard call={call} t={t} />
       <DiagnosticsCard call={call} t={t} />

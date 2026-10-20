@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.1.5 — 2026-10-20
+
+- Refresh the open model visibility card after conversation-key changes, host
+  changes and manual account refresh. Discard the previous directory and its
+  pending replies so switching to a GPT key cannot keep showing DeepSeek IDs.
+- Add built-client tests through the registered plugin RPC and real DSH model
+  registry for switching, empty rings, discovery errors, recovery and delayed
+  visibility-save replies. Evidence is recorded in `docs/validation.md`.
+
 ## 0.1.4 — 2026-10-19
 
 - Deliver the ApophisCode provider with its own package, provider, credential,

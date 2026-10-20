@@ -59,7 +59,7 @@ API Key，并在同名模型分组中选择模型。插件独立管理配置与�
 打开 DSH 的 **设置 → 插件 → 添加插件**，在“包名或地址”中填写：
 
 ```text
-dsh-apophiscode-api@0.1.4
+dsh-apophiscode-api@0.1.5
 ```
 
 点击安装，并确认 **ApophisCode** 已启用。这个入口直接请求 npm 上的指定版本；
@@ -166,7 +166,7 @@ pnpm install --frozen-lockfile
 pnpm run check
 ```
 
-`check` 通过后，安装包位于 `.artifacts/dsh-apophiscode-api-0.1.4.tgz`，可按上述本地文件方式安装。
+`check` 通过后，安装包位于 `.artifacts/dsh-apophiscode-api-0.1.5.tgz`，可按上述本地文件方式安装。
 
 | 命令 | 用途 |
 | --- | --- |

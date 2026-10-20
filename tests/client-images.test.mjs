@@ -49,6 +49,10 @@ test('built image settings persist quality choices, constrain menus by model and
       if (!(index in state.values)) state.values[index] = initial
       return [state.values[index], value => { state.values[index] = typeof value === 'function' ? value(state.values[index]) : value }]
     },
+    useReducer(reducer, initial) {
+      const [value, setValue] = react.useState(initial)
+      return [value, action => setValue(current => reducer(current, action))]
+    },
     useEffect(fn, deps) {
       const index = active.index++
       if (!active.effects[index] || deps.some((value, i) => value !== active.effects[index][i])) { active.effects[index] = deps; fn() }
